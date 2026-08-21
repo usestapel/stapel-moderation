@@ -10,7 +10,16 @@ class TestLazyExports:
     def test_all_declares_public_api(self):
         assert stapel_moderation.__all__ == [
             "moderation_settings",
+            "register_reason",
+            "register_rule",
+            "register_target_type",
+            "NotSanctioned",
         ]
+
+    def test_every_lazy_export_resolves(self):
+        """A declared export that does not import is a broken promise."""
+        for name in stapel_moderation.__all__:
+            assert getattr(stapel_moderation, name) is not None
 
     def test_settings_resolve(self):
         from stapel_moderation.conf import moderation_settings

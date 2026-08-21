@@ -194,10 +194,11 @@ def fetch_content(target_type: str, target_key: str, *, policy: Optional[dict] =
     upstreams shipped that spelling and neither built a tolerant reader
     (spec §22.2).
 
-    A ``LookupError`` from the owner means the target is gone —
-    :class:`TargetNotFound`, a 404. Anything else means the owner could not
-    answer — :class:`ContentUnavailable`, a 503. Collapsing the two would tell
-    a reporter their target does not exist because a sibling service restarted.
+    "The target is gone" and "the owner could not answer" are DIFFERENT
+    answers — :class:`TargetNotFound` (404) and :class:`ContentUnavailable`
+    (503). Collapsing them would tell a reporter their target does not exist
+    because a sibling service restarted. Telling them apart is what
+    :func:`_is_not_found` does, and why it is not a one-liner.
     """
     from stapel_core.comm import CommError, call
 
@@ -215,8 +216,40 @@ def fetch_content(target_type: str, target_key: str, *, policy: Optional[dict] =
     except LookupError as exc:
         raise TargetNotFound(f"{target_type}:{target_key}") from exc
     except CommError as exc:
+        # comm wraps a provider's exception in FunctionCallError, so the
+        # owner's "no such row" arrives here as a transport-shaped failure.
+        if _is_not_found(exc):
+            raise TargetNotFound(f"{target_type}:{target_key}") from exc
         raise ContentUnavailable(str(exc)) from exc
     return TargetContent.from_result(result)
+
+
+def _is_not_found(exc) -> bool:
+    """Was this comm failure the owner saying "no such target"?
+
+    Two shapes, because the two released upstreams disagree:
+    ``listings.moderation_content`` raises ``LookupError`` (the documented
+    contract of the ``*.moderation_content`` family) while
+    ``reviews.moderation_content`` raises a bare ``ReviewNotFound(Exception)``.
+    Rather than answer 503 to half the fleet, the name is accepted as
+    evidence too — and the divergence is recorded as a delta on the spec, to
+    be closed the honest way by ``ReviewNotFound`` subclassing ``LookupError``
+    in its next minor.
+
+    **Stated limitation.** ``__cause__`` only survives the in-process
+    transport; over NATS or HTTP the owner's exception is flattened into a
+    message string, so a missing target reads as an outage and the case is
+    retried instead of dismissed. Retrying a target that is gone is the safe
+    direction of that error (the screening task parks and a human looks),
+    and closing it properly means structured error codes on comm — core's
+    work, not a per-module string match on a remote message.
+    """
+    cause = exc.__cause__
+    if cause is None:
+        return False
+    if isinstance(cause, LookupError):
+        return True
+    return type(cause).__name__.endswith("NotFound")
 
 
 # ── Case lifecycle ───────────────────────────────────────────────────
@@ -596,10 +629,16 @@ def resolve_case(
             events.emit_moderation_completed(
                 case, verdict, topic=verdict_topic, emit_event=emit_event
             )
-        for report_id in case.reports.values_list("id", flat=True):
-            events.emit_report_reviewed(
-                str(report_id), case, decision, emit_event=emit_event
-            )
+        if decision in TERMINAL_DECISIONS:
+            # Only a decision that CLOSES the case has reviewed anybody's
+            # report. Announcing `needs_review` here would tell every
+            # complainant their report was decided when the automation had
+            # just asked for a human — and it would burn the notification
+            # cooldown, so the real outcome letter would never be sent.
+            for report_id in case.reports.values_list("id", flat=True):
+                events.emit_report_reviewed(
+                    str(report_id), case, decision, emit_event=emit_event
+                )
     return verdict
 
 
@@ -739,7 +778,9 @@ def issue_sanction(
             CaseEventKind.SANCTIONED,
             actor_id=issued_by,
             sanction_id=str(sanction.id),
-            kind=kind,
+            # Not `kind=`: that is _log's own positional parameter, and the
+            # collision is a TypeError rather than a shadowed payload key.
+            sanction_kind=kind,
         )
         events.emit_sanction_issued(sanction, emit_event=emit_event)
 
@@ -834,7 +875,7 @@ def lift_sanction(sanction, *, actor_id=None, state=SanctionState.LIFTED, note: 
             CaseEventKind.SANCTIONED,
             actor_id=actor_id,
             sanction_id=str(sanction.id),
-            state=state,
+            sanction_state=state,
         )
         events.emit_sanction_lifted(sanction, emit_event=emit_event)
     _clear_enforcement(sanction.subject_user_id)

@@ -68,19 +68,39 @@ def handle_intake(event) -> None:
             if created:
                 services.start_screening(case, emit_event=emit_event)
             else:
-                # A resubmission after an edit, or a redelivered event. Both
-                # are audited; only the first earns a re-screen, and only when
-                # the case is not already being worked by a person.
+                # A redelivered event, or a genuine resubmission after an
+                # edit — and **the payload cannot tell them apart**. Neither
+                # `listing.submitted` nor any other intake topic in the fleet
+                # carries a revision token, so "re-screen on every delivery"
+                # would turn an at-least-once bus into an unbounded LLM bill,
+                # and could yank a case out from under the moderator holding
+                # it. Both are audited; only a case still in OPEN (never
+                # screened) is screened here. The explicit "look again" paths
+                # are the moderator's rescan endpoint and the
+                # `moderation.submit` Function — a decision, not an omission,
+                # recorded as a delta on spec §5.3.
                 services._log(case, CaseEventKind.RESUBMITTED, topic=event.event_type)
                 if case.state == CaseState.OPEN:
                     services.start_screening(case, emit_event=emit_event)
 
 
+#: Topics already wired to :func:`handle_intake`. Subscribing twice would
+#: open two cases for one event, so the set is the idempotency guard.
+_subscribed_topics: set = set()
+
+
 def subscribe_intake_events() -> list:
     """Wire ``handle_intake`` to every topic a registered policy names.
 
-    Called from ``apps.ready()``. Returns the topics wired, so the system
-    check can tell "no intake configured" from "intake configured and silent".
+    Called from ``apps.ready()`` for the settings layer, and AGAIN from
+    ``register_target_type`` for the runtime layer. Both are needed, and the
+    second is the interesting one: a target type registered after boot would
+    otherwise be a policy with ``intake_events`` nobody listens to — the
+    "declared but not connected" defect this module is supposed to be immune
+    to, reproduced in its own extension seam.
+
+    Returns the topics newly wired, so a caller can tell "nothing to do" from
+    "wired something".
     """
     from .registry import get_target_types
 
@@ -91,9 +111,21 @@ def subscribe_intake_events() -> list:
             for topic in tuple((policy or {}).get("intake_events") or ())
         }
     )
-    for topic in topics:
+    fresh = [topic for topic in topics if topic not in _subscribed_topics]
+    for topic in fresh:
         subscribe_action(topic, handle_intake)
-    return topics
+        _subscribed_topics.add(topic)
+    return fresh
+
+
+def reset_intake_subscriptions() -> None:
+    """Tests only: forget which topics were wired.
+
+    The handler stays subscribed in the action registry — dropping it there
+    is the test harness's business — but the guard is cleared so a re-register
+    in the next test wires again.
+    """
+    _subscribed_topics.clear()
 
 
 # ── The screening ladder's end ───────────────────────────────────────

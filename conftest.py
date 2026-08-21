@@ -36,12 +36,28 @@ import pytest  # noqa: E402
 
 @pytest.fixture(autouse=True)
 def _reset_registries():
-    """Target types, reasons and rules, clean before and after every test."""
+    """Target types, reasons and rules, clean before and after every test.
+
+    The intake subscriptions are torn down with them: ``register_target_type``
+    wires a policy's ``intake_events`` as a side effect, and a handler left
+    subscribed from a previous test would open a case for an event this test
+    never registered a type for.
+    """
+    from stapel_core.comm import action_registry
+
+    from stapel_moderation.actions import handle_intake, reset_intake_subscriptions
     from stapel_moderation.registry import reset_registries
 
-    reset_registries()
+    def _unwire():
+        reset_registries()
+        reset_intake_subscriptions()
+        for handlers in action_registry._subscribers.values():
+            while handle_intake in handlers:
+                handlers.remove(handle_intake)
+
+    _unwire()
     yield
-    reset_registries()
+    _unwire()
 
 
 @pytest.fixture(autouse=True)

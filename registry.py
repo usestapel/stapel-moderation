@@ -52,8 +52,23 @@ class UnknownReason(Exception):
 
 def register_target_type(name: str, policy: Optional[dict]) -> None:
     """Register/override a target type at runtime. ``policy=None`` removes a
-    type a lower layer (built-ins / settings) provided."""
+    type a lower layer (built-ins / settings) provided.
+
+    Wires the type's ``intake_events`` as a side effect. Without that a type
+    registered after ``apps.ready()`` would declare topics nobody is
+    listening to — "declared but not connected", in the module whose whole
+    job is catching that. The subscription is idempotent, and it is skipped
+    silently before the app registry is ready (import order during boot).
+    """
     _runtime_target_types[name] = policy
+    if policy is None:
+        return
+    try:
+        from .actions import subscribe_intake_events
+
+        subscribe_intake_events()
+    except (ImportError, RuntimeError):  # pragma: no cover — boot ordering
+        pass
 
 
 def reset_target_types() -> None:
