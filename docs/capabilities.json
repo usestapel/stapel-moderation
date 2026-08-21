@@ -1,0 +1,612 @@
+{
+  "module": "stapel-moderation",
+  "version": "0.1.0",
+  "provides": "The fleet's single producer of moderation verdicts: one target-generic queue over listings, reviews, chat messages and profiles, keyed by an opaque (target_type, target_key) and driven by a host-registered policy per type. One Case per target however many people complain, one status vocabulary in the whole module, an append-only Verdict and an append-only CaseEvent audit trail whose mutations are FORBIDDEN by mandate declaration. Screening is a comm-Task (deterministic rules, then schema-constrained llm.complete) with a closed hold-for-a-human default when the automation cannot answer. Resolution ACTS on the target by emitting moderation.completed, which stapel-listings and stapel-reviews already consume. Sanctions carry a kind, a scope, a reason, a clock, an appeal and an audit trail, and they bite through core's cross-service user blacklist — the hook every request path already checked and nobody had ever called. Plus DSA artefacts generated from the registries: a public policy disclosure, a statement of reasons on every takedown, an acknowledgement to every complainant, and an internal appeal heard by a different moderator.",
+  "axes": [
+    {
+      "key": "TARGET_TYPES",
+      "kind": "enum",
+      "default": {},
+      "group": "moderation.targets",
+      "gates": {
+        "operations": [],
+        "co_gates": []
+      },
+      "curated": {
+        "summary": "Empty out of the box: the module ships knowing nothing about listings, reviews or profiles, and a host declares each kind with a policy saying where its content is read from and how a verdict reaches it. That is what lets one queue and one moderator console serve every kind of content a product has, instead of one review screen per feature.",
+        "business_label": "What can be moderated"
+      }
+    },
+    {
+      "key": "SCREENER",
+      "kind": "enum",
+      "default": "stapel_moderation.screening.default_screener",
+      "group": "moderation.screening",
+      "gates": {
+        "operations": [],
+        "co_gates": []
+      },
+      "curated": {
+        "summary": "The shipped rules-then-model ladder. A product with its own classifier replaces the whole stage by naming its callable here — the extension point exists so that bringing your own model is configuration rather than a fork.",
+        "business_label": "Who does the automatic review"
+      }
+    },
+    {
+      "key": "SCREEN_ENABLED",
+      "kind": "bool",
+      "default": true,
+      "group": "moderation.screening",
+      "gates": {
+        "operations": [],
+        "co_gates": []
+      },
+      "curated": {
+        "summary": "On. Every case is first seen by a deterministic rule set and then, if nothing matched, by a language model answering a fixed schema. Turning it off is the honest configuration for a deployment with no model available: every case then goes straight to a person, and nothing is published without a decision.",
+        "business_label": "Automatic first-pass review"
+      }
+    },
+    {
+      "key": "ON_SCREENING_FAILURE",
+      "kind": "enum",
+      "default": "hold",
+      "group": "moderation.screening",
+      "gates": {
+        "operations": [],
+        "co_gates": []
+      },
+      "curated": {
+        "summary": "Hold: the case goes to the human queue and nothing is published without a decision. The alternatives exist and are named — approve trades safety for availability, reject trades the other way — and choosing either prints a startup warning saying so, because the predecessor system published unmoderated listings roughly half an hour after its model went down and nothing anywhere said that was happening.",
+        "business_label": "What happens when the automatic reviewer is down"
+      }
+    },
+    {
+      "key": "ON_SCREENING_UNAVAILABLE",
+      "kind": "enum",
+      "default": "hold",
+      "group": "moderation.screening",
+      "gates": {
+        "operations": [],
+        "co_gates": []
+      },
+      "curated": {
+        "summary": "Hold, same vocabulary as above, for the deployment that never had a model rather than one whose model is temporarily down. The human queue is the fallback in both cases.",
+        "business_label": "What happens with no automatic reviewer configured at all"
+      }
+    },
+    {
+      "key": "AUTO_RESOLVE_STALE_QUEUE",
+      "kind": "enum",
+      "default": null,
+      "group": "moderation.queue",
+      "gates": {
+        "operations": [],
+        "co_gates": []
+      },
+      "curated": {
+        "summary": "Off, and the setting mostly exists so that 'we do not do this' is something an auditor can read. The predecessor system swept every unreviewed case — including the ones its model had explicitly flagged for a human — into automatic approval every five minutes, which meant human review existed on the org chart and nowhere else. Setting a number here prints a startup warning.",
+        "business_label": "Auto-approve cases nobody reviewed"
+      }
+    },
+    {
+      "key": "ALLOW_ANONYMOUS_REPORTS",
+      "kind": "bool",
+      "default": false,
+      "group": "moderation.intake",
+      "gates": {
+        "operations": [],
+        "co_gates": []
+      },
+      "curated": {
+        "summary": "Off. Opening it makes a contact address mandatory on every report (the notice-and-action regime wants a way to answer the submitter) and demands a captcha, because a flood of anonymous complaints is a denial-of-service against the moderation queue itself. The price of keeping it closed is stated plainly: some real violations will go unreported.",
+        "business_label": "Let signed-out visitors report content"
+      }
+    },
+    {
+      "key": "APPEAL_REQUIRES_DIFFERENT_ACTOR",
+      "kind": "bool",
+      "default": true,
+      "group": "moderation.appeals",
+      "gates": {
+        "operations": [],
+        "co_gates": []
+      },
+      "curated": {
+        "summary": "On. The moderator who decided a case cannot decide the appeal against it — an internal complaint system heard by the same person is a formality. A team with one moderator turns it off knowingly rather than discovering that its appeals rubber-stamp themselves.",
+        "business_label": "Appeals heard by a second person"
+      }
+    },
+    {
+      "key": "RETENTION_DAYS",
+      "kind": "enum",
+      "default": 365,
+      "group": "moderation.retention",
+      "gates": {
+        "operations": [],
+        "co_gates": []
+      },
+      "curated": {
+        "summary": "365 days — a full annual reporting cycle, so a statement of reasons stays checkable for as long as anybody may ask about it. A short excerpt of the content is kept with the verdict for the same reason: a decision has to remain reviewable after the content it was about is gone.",
+        "business_label": "How long a closed case is kept"
+      }
+    },
+    {
+      "key": "SANCTION_RETENTION_DAYS",
+      "kind": "enum",
+      "default": 1095,
+      "group": "moderation.retention",
+      "gates": {
+        "operations": [],
+        "co_gates": []
+      },
+      "curated": {
+        "summary": "1095 days, deliberately longer than the case that produced it. Penalties escalate with repetition, so the memory IS the mechanism — a record that forgets makes every third offence a first one. A case with a surviving penalty is never purged out from under it.",
+        "business_label": "How long an account penalty is remembered"
+      }
+    },
+    {
+      "key": "WORKSPACE_SCOPED",
+      "kind": "bool",
+      "default": false,
+      "group": "moderation.tenancy",
+      "gates": {
+        "operations": [],
+        "co_gates": []
+      },
+      "curated": {
+        "summary": "Off, declared and closed. The queue already partitions by an opaque tenant key, and neither listings nor reviews are tenant-keyed today, so the capability door would add a lock with nothing behind it. The capability names are published on day one so that a product's role definitions never have to be migrated when it opens.",
+        "business_label": "Per-tenant moderation permissions"
+      }
+    }
+  ],
+  "extension_points": [
+    {
+      "name": "TARGET_TYPES",
+      "kind": "merge_registry",
+      "summary": "The flagship seam and the reason the module is target-generic: built-ins are EMPTY, so a host declares what may be moderated at all. A policy is a plain dict — where content is read from (content_function, mandatory), which events open a case, which topic carries the verdict out, which notification type announces a takedown, and per-type behaviour switches. None removes a type; runtime registration also wires that type's intake subscriptions."
+    },
+    {
+      "name": "REASONS",
+      "kind": "merge_registry",
+      "summary": "The complaint taxonomy, and unlike the target types it ships non-empty — spam means the same thing on a listing, a review and an avatar. Each entry carries a severity that orders the queue, whether an explanation is required, which target types it applies to, and the ToU clause quoted in the statement of reasons. One table across every target type is what stops a reason filter from silently dropping a whole class of complaints."
+    },
+    {
+      "name": "RULES",
+      "kind": "merge_registry",
+      "summary": "The deterministic pre-LLM stage: a pattern, a decision and a severity. Ships EMPTY on purpose — a shipped keyword list is somebody else's speech policy. A hit is a verdict without paying for a completion, and the policy disclosure enumerates every rule that runs."
+    },
+    {
+      "name": "SCREENER",
+      "kind": "dotted_path",
+      "summary": "The whole automatic stage behind one dotted path: (case, content, *, reports) -> ScreeningResult. A host with its own classifier plugs in here rather than forking the module, and the shipped implementation (rules, then schema-constrained llm.complete) is simply the default value."
+    },
+    {
+      "name": "PRESENTERS",
+      "kind": "swap_keys",
+      "summary": "Every DTO is built by a presenter resolved through STAPEL_SWAP — MODERATION_CASE_PRESENTER, MODERATION_CASE_DETAIL_PRESENTER, MODERATION_REPORT_PRESENTER, MODERATION_VERDICT_PRESENTER, MODERATION_EVENT_PRESENTER, MODERATION_SANCTION_PRESENTER, MODERATION_APPEAL_PRESENTER reshape any envelope without forking a view."
+    },
+    {
+      "name": "NotSanctioned",
+      "kind": "permission_class",
+      "summary": "The enforcement half the module deliberately does NOT do itself: moderation answers whether a user is sanctioned, and the host hangs this DRF permission on its own write views. Gating publication inside stapel-listings would be a decision about the listings API, which belongs to its owner."
+    }
+  ],
+  "surface": [
+    {
+      "name": "authorize",
+      "kind": "gate_function",
+      "path": "stapel_moderation.authz.authorize",
+      "intent": "The single authorization choke point of the moderator surface: one declared action in, allow/deny out, decided by the core staff mandate.",
+      "instead_of": [
+        "an email allow-list of moderators",
+        "checking request.user.is_staff directly"
+      ]
+    },
+    {
+      "name": "check_can_report",
+      "kind": "gate_function",
+      "path": "stapel_moderation.registry.check_can_report",
+      "intent": "Ask the type's can_report callback whether this reporter may file. Fail-OPEN when unset; a callback that raises blocks the write rather than defaulting to permissive."
+    },
+    {
+      "name": "check_can_view_content",
+      "kind": "gate_function",
+      "path": "stapel_moderation.registry.check_can_view_content",
+      "intent": "Ask the type's can_view_content callback about a moderator's read. Fail-OPEN by design — the caller already cleared the staff mandate, and blanking the card hides content from the person paid to look at it."
+    },
+    {
+      "name": "content_payload_key",
+      "kind": "predicate",
+      "path": "stapel_moderation.registry.content_payload_key",
+      "intent": "The payload key a target's content_function expects its id under — the target module's own id name, not a generic one."
+    },
+    {
+      "name": "get_reasons",
+      "kind": "predicate",
+      "path": "stapel_moderation.registry.get_reasons",
+      "intent": "The effective reason registry with every entry fully defaulted."
+    },
+    {
+      "name": "get_rules",
+      "kind": "predicate",
+      "path": "stapel_moderation.registry.get_rules",
+      "intent": "The effective rule registry with every entry fully defaulted."
+    },
+    {
+      "name": "get_target_types",
+      "kind": "predicate",
+      "path": "stapel_moderation.registry.get_target_types",
+      "intent": "The effective target-type registry: built-ins, then settings, then runtime, with None removing."
+    },
+    {
+      "name": "reason_applies",
+      "kind": "predicate",
+      "path": "stapel_moderation.registry.reason_applies",
+      "intent": "Whether a reason may be used against a given target type."
+    },
+    {
+      "name": "reasons_for_target",
+      "kind": "predicate",
+      "path": "stapel_moderation.registry.reasons_for_target",
+      "intent": "The reasons a REPORTER may choose for a target type — the registry's own applies_to intersected with the policy's allowlist, never a system reason."
+    },
+    {
+      "name": "register_reason",
+      "kind": "factory",
+      "path": "stapel_moderation.registry.register_reason",
+      "intent": "Add or remove a complaint reason at runtime."
+    },
+    {
+      "name": "register_rule",
+      "kind": "factory",
+      "path": "stapel_moderation.registry.register_rule",
+      "intent": "Add or remove a deterministic screening rule at runtime."
+    },
+    {
+      "name": "register_target_type",
+      "kind": "factory",
+      "path": "stapel_moderation.registry.register_target_type",
+      "intent": "Declare what may be moderated, at runtime. Also wires that type's intake subscriptions, so a type registered after boot is never a policy nobody listens to."
+    },
+    {
+      "name": "reset_reasons",
+      "kind": "factory",
+      "path": "stapel_moderation.registry.reset_reasons",
+      "intent": "Tests only: drop runtime reason overrides."
+    },
+    {
+      "name": "reset_registries",
+      "kind": "factory",
+      "path": "stapel_moderation.registry.reset_registries",
+      "intent": "Tests only: drop every runtime override in one call."
+    },
+    {
+      "name": "reset_rules",
+      "kind": "factory",
+      "path": "stapel_moderation.registry.reset_rules",
+      "intent": "Tests only: drop runtime rule overrides."
+    },
+    {
+      "name": "reset_target_types",
+      "kind": "factory",
+      "path": "stapel_moderation.registry.reset_target_types",
+      "intent": "Tests only: drop runtime target-type overrides."
+    },
+    {
+      "name": "resolve_policy",
+      "kind": "predicate",
+      "path": "stapel_moderation.registry.resolve_policy",
+      "intent": "The fully-defaulted policy for a target type, or UnknownTargetType. Every key a call site reads is guaranteed present, so nothing guesses a default locally.",
+      "instead_of": [
+        "policy.get('gate', 'post')"
+      ]
+    },
+    {
+      "name": "resolve_policy_lenient",
+      "kind": "predicate",
+      "path": "stapel_moderation.registry.resolve_policy_lenient",
+      "intent": "The same, but an unregistered type yields a neutral policy. Staff-side only: a host that de-registers a type must not be able to strand the open cases about it."
+    },
+    {
+      "name": "resolve_reason",
+      "kind": "predicate",
+      "path": "stapel_moderation.registry.resolve_reason",
+      "intent": "One resolved reason entry, or UnknownReason."
+    },
+    {
+      "name": "rules_for_target",
+      "kind": "predicate",
+      "path": "stapel_moderation.registry.rules_for_target",
+      "intent": "Rules applicable to one target type, in stable code order."
+    },
+    {
+      "name": "target_type_for_event",
+      "kind": "predicate",
+      "path": "stapel_moderation.registry.target_type_for_event",
+      "intent": "Every registered target type whose intake_events names a given topic."
+    },
+    {
+      "name": "active_sanctions",
+      "kind": "predicate",
+      "path": "stapel_moderation.services.active_sanctions",
+      "intent": "Live sanctions for a user, optionally narrowed to one scope, with expiry evaluated in the query rather than trusted to the sweeper.",
+      "instead_of": [
+        "Sanction.objects.filter(state='active')"
+      ]
+    },
+    {
+      "name": "apply_sanction_enforcement",
+      "kind": "gate_function",
+      "path": "stapel_moderation.services.apply_sanction_enforcement",
+      "intent": "Set the blacklist key for a sanction whose kind calls for it. Deliberately outside the transaction: a cache write cannot be rolled back."
+    },
+    {
+      "name": "claim_case",
+      "kind": "factory",
+      "path": "stapel_moderation.services.claim_case",
+      "intent": "Take a lease on a case. A live lease held by somebody else refuses, which is what stops two moderators silently working one report."
+    },
+    {
+      "name": "erase_user_reports",
+      "kind": "factory",
+      "path": "stapel_moderation.services.erase_user_reports",
+      "intent": "Detach a user from their complaints and appeals, keeping the case, the counts and the platform's own compliance record.",
+      "instead_of": [
+        "Report.objects.filter(...).delete()"
+      ]
+    },
+    {
+      "name": "fetch_content",
+      "kind": "factory",
+      "path": "stapel_moderation.services.fetch_content",
+      "intent": "Read a target's LIVE content through its policy's content_function. The module stores no copy and reads nothing off the event, so this is the only way to see what is being moderated.",
+      "instead_of": [
+        "reading title/description out of an intake event payload"
+      ]
+    },
+    {
+      "name": "issue_sanction",
+      "kind": "factory",
+      "path": "stapel_moderation.services.issue_sanction",
+      "intent": "Issue a sanction against an existing case, announce it, and make it bite through core's cross-service user blacklist.",
+      "instead_of": [
+        "Sanction.objects.create",
+        "stapel_core.django.jwt.authentication.blacklist_user"
+      ]
+    },
+    {
+      "name": "issue_standalone_sanction",
+      "kind": "factory",
+      "path": "stapel_moderation.services.issue_standalone_sanction",
+      "intent": "Sanction a user outside a verdict and still leave exactly one audit trail — it opens a manual case rather than allowing a case-less ban."
+    },
+    {
+      "name": "ladder_duration",
+      "kind": "predicate",
+      "path": "stapel_moderation.services.ladder_duration",
+      "intent": "How long the subject's NEXT sanction of a kind should last, per the configured progressive ladder.",
+      "instead_of": [
+        "hardcoding 24h/7d/30d at a call site"
+      ]
+    },
+    {
+      "name": "lift_sanction",
+      "kind": "factory",
+      "path": "stapel_moderation.services.lift_sanction",
+      "intent": "Revoke an active sanction and stop enforcing it — without freeing a user who is still under another one.",
+      "instead_of": [
+        "unblacklist_user"
+      ]
+    },
+    {
+      "name": "list_appeals",
+      "kind": "predicate",
+      "path": "stapel_moderation.services.list_appeals",
+      "intent": "One keyset page of appeals, for the moderator queue or for one appellant."
+    },
+    {
+      "name": "list_cases",
+      "kind": "predicate",
+      "path": "stapel_moderation.services.list_cases",
+      "intent": "One keyset page of the cross-target queue — one table, one index, one LIMIT in the database.",
+      "instead_of": [
+        "merging two querysets in Python and slicing the list"
+      ]
+    },
+    {
+      "name": "list_reports",
+      "kind": "predicate",
+      "path": "stapel_moderation.services.list_reports",
+      "intent": "One keyset page of a user's own complaints."
+    },
+    {
+      "name": "list_sanctions",
+      "kind": "predicate",
+      "path": "stapel_moderation.services.list_sanctions",
+      "intent": "One keyset page of sanctions, optionally scoped to one subject or state."
+    },
+    {
+      "name": "open_appeal",
+      "kind": "factory",
+      "path": "stapel_moderation.services.open_appeal",
+      "intent": "Register an appeal against a resolved case (the internal complaint-handling system).",
+      "instead_of": [
+        "Appeal.objects.create"
+      ]
+    },
+    {
+      "name": "open_case",
+      "kind": "factory",
+      "path": "stapel_moderation.services.open_case",
+      "intent": "Find or open the live case for one target — the single entry point of all three intake paths, and where idempotency-by-state lives.",
+      "instead_of": [
+        "Case.objects.create",
+        "Case.objects.get_or_create"
+      ]
+    },
+    {
+      "name": "policy_disclosure",
+      "kind": "predicate",
+      "path": "stapel_moderation.services.policy_disclosure",
+      "intent": "The transparency disclosure, assembled from the registries and settings rather than kept as prose that drifts out of sync with what the system does."
+    },
+    {
+      "name": "queue_case",
+      "kind": "factory",
+      "path": "stapel_moderation.services.queue_case",
+      "intent": "Send a case to the human queue and announce it. Use when a host decides a person must look, whatever the automation said."
+    },
+    {
+      "name": "queue_stats",
+      "kind": "predicate",
+      "path": "stapel_moderation.services.queue_stats",
+      "intent": "Queue counters for the console header and for periodic transparency reporting."
+    },
+    {
+      "name": "record_verdict",
+      "kind": "factory",
+      "path": "stapel_moderation.services.record_verdict",
+      "intent": "Append one verdict row plus its audit entry. Never updates, never deletes.",
+      "instead_of": [
+        "Verdict.objects.create",
+        "Verdict.save"
+      ]
+    },
+    {
+      "name": "release_case",
+      "kind": "factory",
+      "path": "stapel_moderation.services.release_case",
+      "intent": "Hand a claimed case back to the queue and audit the release."
+    },
+    {
+      "name": "rescan_case",
+      "kind": "factory",
+      "path": "stapel_moderation.services.rescan_case",
+      "intent": "Send a case back through the automatic screener, reopening it first if it was already decided — the explicit 'look again' path."
+    },
+    {
+      "name": "resolve_appeal",
+      "kind": "factory",
+      "path": "stapel_moderation.services.resolve_appeal",
+      "intent": "Decide an appeal, enforce the different-actor rule, and let an overturn actually reopen and re-decide the case rather than just filing a letter."
+    },
+    {
+      "name": "resolve_case",
+      "kind": "factory",
+      "path": "stapel_moderation.services.resolve_case",
+      "intent": "Close a case with a verdict and ACT on the target by emitting the policy's verdict topic — optionally issuing the sanction in the same transaction.",
+      "instead_of": [
+        "emitting moderation.completed by hand",
+        "calling a target module to mutate it"
+      ]
+    },
+    {
+      "name": "sanction_snapshot",
+      "kind": "predicate",
+      "path": "stapel_moderation.services.sanction_snapshot",
+      "intent": "The {allowed, sanctions} answer BOTH projection modes hand back — the one shape local and remote reads agree on."
+    },
+    {
+      "name": "sanctions_export",
+      "kind": "predicate",
+      "path": "stapel_moderation.services.sanctions_export",
+      "intent": "The cursor-paged snapshot the sanction projection rebuilds from. Answers {rows, cursor, total} — an {items} shape would rebuild the table to empty and report success."
+    },
+    {
+      "name": "start_screening",
+      "kind": "factory",
+      "path": "stapel_moderation.services.start_screening",
+      "intent": "Queue the screening comm-Task for a case, or send it straight to a human when automation is off for this type or this deployment.",
+      "instead_of": [
+        "calling llm.complete inline in a request"
+      ]
+    },
+    {
+      "name": "submit_report",
+      "kind": "factory",
+      "path": "stapel_moderation.services.submit_report",
+      "intent": "Accept one complaint: validate against the reason registry and the type policy, join or open the case, record the report, count it.",
+      "instead_of": [
+        "Report.objects.create"
+      ]
+    },
+    {
+      "name": "transition",
+      "kind": "gate_function",
+      "path": "stapel_moderation.services.transition",
+      "intent": "Move a case along a DECLARED edge and audit it in the same transaction; an undeclared edge raises instead of being assigned.",
+      "instead_of": [
+        "Case.state = ...; case.save()"
+      ]
+    },
+    {
+      "name": "apply_screening_failure",
+      "kind": "gate_function",
+      "path": "stapel_moderation.tasks.apply_screening_failure",
+      "intent": "Apply the ON_SCREENING_FAILURE policy to a case whose screening was parked after exhausting its retries."
+    },
+    {
+      "name": "expire_sanctions",
+      "kind": "factory",
+      "path": "stapel_moderation.tasks.expire_sanctions",
+      "intent": "Flip lapsed sanctions to expired, announce it, and stop enforcing them."
+    },
+    {
+      "name": "get_moderation_beat_schedule",
+      "kind": "factory",
+      "path": "stapel_moderation.tasks.get_moderation_beat_schedule",
+      "intent": "The beat entries for every scheduled job, on the configured cadences — so a host wires them all at once instead of remembering four names."
+    },
+    {
+      "name": "purge_expired_cases",
+      "kind": "factory",
+      "path": "stapel_moderation.tasks.purge_expired_cases",
+      "intent": "Destroy closed cases and lapsed sanctions past their two different retention horizons, never a case a live sanction still depends on."
+    },
+    {
+      "name": "rearm_active_sanctions",
+      "kind": "factory",
+      "path": "stapel_moderation.tasks.rearm_active_sanctions",
+      "intent": "Re-set the enforcement key for every sanction that should still bite. Without it a long suspension silently stops being enforced when the cache key expires."
+    },
+    {
+      "name": "screen_case",
+      "kind": "factory",
+      "path": "stapel_moderation.tasks.screen_case",
+      "intent": "The comm-Task handler: read live content, run the screener, record a verdict. Raises rather than returning on failure, which is what makes the retry ladder exist at all."
+    },
+    {
+      "name": "sweep_stale_cases",
+      "kind": "factory",
+      "path": "stapel_moderation.tasks.sweep_stale_cases",
+      "intent": "Return expired claims and stalled screenings to the queue. Never renders a verdict — that is the whole difference from the predecessor system's stale sweeper."
+    }
+  ],
+  "operations_total": 18,
+  "requires": [
+    {
+      "module": "stapel-core",
+      "optional": false,
+      "reason": "comm Actions/Functions/Tasks (the screening retry ladder IS the Task primitive), the Projection primitive for user_sanctions, the transactional outbox, staff-mandate access declarations, the cross-service user blacklist that gives a ban its teeth, notification publishing, the GDPR provider registry, the unified error envelope and the AppSettings config layer"
+    },
+    {
+      "module": "stapel-agent",
+      "optional": true,
+      "reason": "the default screener calls llm.complete BY NAME over comm and imports nothing — a deployment without an agent boots fine and sends every case to the human queue (ON_SCREENING_UNAVAILABLE). Only the prompt-injection sanitizer is imported, lazily, with a warning when absent"
+    },
+    {
+      "module": "stapel-notifications",
+      "optional": true,
+      "reason": "the five letters (report received, report reviewed, content blocked, sanction issued, appeal resolved) go out through request_notification; 0.14.0 registers the three moderation.* types and the reason_label/appeal_url variables DSA Art. 17 needs. Without it the verdicts still land, silently"
+    },
+    {
+      "module": "stapel-auth",
+      "optional": true,
+      "reason": "moderator rights are staff roles transported as the JWT staff_roles claim; any issuer of that claim satisfies the contract. The module defines no allow-list of its own"
+    },
+    {
+      "module": "stapel-cdn",
+      "optional": true,
+      "reason": "cdn.describe resolves a target's media references into image URLs for the screener; a deployment with no CDN screens text only"
+    }
+  ]
+}

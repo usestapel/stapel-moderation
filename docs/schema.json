@@ -1,0 +1,1739 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "",
+    "version": "0.0.0"
+  },
+  "paths": {
+    "/moderation/api/v1/appeals/": {
+      "get": {
+        "operationId": "moderation_api_v1_appeals_list",
+        "description": "Appeal a decision about your content, or list your appeals.\n\n**Permissions:** `IsNotAnonymousUser`",
+        "tags": [
+          "Moderation / appeals"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AppealPresenterDTO"
+                  }
+                },
+                "examples": {
+                  "AppealPresenterDTO": {
+                    "value": [
+                      {
+                        "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                        "case_id": "9aa1e5b0-0000-4000-8000-000000000001",
+                        "sanction_id": null,
+                        "appellant_id": "5cc26b64-0717-4562-b3fc-2c963f66a001",
+                        "body": "The item is a licensed replica, here is the certificate.",
+                        "state": "open",
+                        "resolution_note": "",
+                        "resolved_by": null,
+                        "created_at": "2026-08-21T10:00:00+00:00",
+                        "resolved_at": null
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "description": ""
+          }
+        }
+      },
+      "post": {
+        "operationId": "moderation_api_v1_appeals_create",
+        "description": "Appeal a decision about your content, or list your appeals.\n\n**Permissions:** `IsNotAnonymousUser`",
+        "tags": [
+          "Moderation / appeals"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppealCreate"
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/AppealCreate"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/AppealCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppealPresenterDTO"
+                },
+                "examples": {
+                  "AppealPresenterDTO": {
+                    "value": {
+                      "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                      "case_id": "9aa1e5b0-0000-4000-8000-000000000001",
+                      "sanction_id": null,
+                      "appellant_id": "5cc26b64-0717-4562-b3fc-2c963f66a001",
+                      "body": "The item is a licensed replica, here is the certificate.",
+                      "state": "open",
+                      "resolution_note": "",
+                      "resolved_by": null,
+                      "created_at": "2026-08-21T10:00:00+00:00",
+                      "resolved_at": null
+                    }
+                  }
+                }
+              }
+            },
+            "description": ""
+          }
+        }
+      }
+    },
+    "/moderation/api/v1/appeals/{appeal_id}/resolve": {
+      "post": {
+        "operationId": "moderation_api_v1_appeals_resolve_create",
+        "description": "Decide an appeal. An overturn actually reopens and re-decides the case.\n\n**Permissions:** `HasModerationMandate_appeal_resolve`",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "appeal_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "tags": [
+          "Moderation / appeals"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppealResolve"
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/AppealResolve"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/AppealResolve"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppealPresenterDTO"
+                },
+                "examples": {
+                  "AppealPresenterDTO": {
+                    "value": {
+                      "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                      "case_id": "9aa1e5b0-0000-4000-8000-000000000001",
+                      "sanction_id": null,
+                      "appellant_id": "5cc26b64-0717-4562-b3fc-2c963f66a001",
+                      "body": "The item is a licensed replica, here is the certificate.",
+                      "state": "open",
+                      "resolution_note": "",
+                      "resolved_by": null,
+                      "created_at": "2026-08-21T10:00:00+00:00",
+                      "resolved_at": null
+                    }
+                  }
+                }
+              }
+            },
+            "description": ""
+          }
+        }
+      }
+    },
+    "/moderation/api/v1/appeals/queue": {
+      "get": {
+        "operationId": "moderation_api_v1_appeals_queue_list",
+        "description": "The appeals a moderator has to decide.\n\n**Permissions:** `HasModerationMandate_appeal_view`",
+        "tags": [
+          "Moderation / appeals"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AppealPresenterDTO"
+                  }
+                },
+                "examples": {
+                  "AppealPresenterDTO": {
+                    "value": [
+                      {
+                        "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                        "case_id": "9aa1e5b0-0000-4000-8000-000000000001",
+                        "sanction_id": null,
+                        "appellant_id": "5cc26b64-0717-4562-b3fc-2c963f66a001",
+                        "body": "The item is a licensed replica, here is the certificate.",
+                        "state": "open",
+                        "resolution_note": "",
+                        "resolved_by": null,
+                        "created_at": "2026-08-21T10:00:00+00:00",
+                        "resolved_at": null
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "description": ""
+          }
+        }
+      }
+    },
+    "/moderation/api/v1/cases": {
+      "get": {
+        "operationId": "moderation_api_v1_cases_list",
+        "description": "One keyset page of the cross-target queue.\n\n**Permissions:** `HasModerationMandate_queue_view`",
+        "tags": [
+          "Moderation / queue"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CasePresenterDTO"
+                  }
+                },
+                "examples": {
+                  "CasePresenterDTO": {
+                    "value": [
+                      {
+                        "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                        "target_type": "listing",
+                        "target_key": "412",
+                        "scope_key": "",
+                        "origin": "report",
+                        "state": "queued",
+                        "severity": 3,
+                        "report_count": 12,
+                        "subject_user_id": "5cc26b64-0717-4562-b3fc-2c963f66a001",
+                        "claimed_by": null,
+                        "claimed_until": null,
+                        "last_decision": "",
+                        "first_reported_at": "2026-08-21T10:00:00+00:00",
+                        "created_at": "2026-08-21T10:00:00+00:00",
+                        "updated_at": "2026-08-21T10:05:00+00:00",
+                        "resolved_at": null
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "description": ""
+          }
+        }
+      }
+    },
+    "/moderation/api/v1/cases/{case_id}": {
+      "get": {
+        "operationId": "moderation_api_v1_cases_retrieve",
+        "description": "One case card, with the target's content read live.\n\n**Permissions:** `HasModerationMandate_case_view`",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "tags": [
+          "Moderation / queue"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaseDetailPresenterDTO"
+                },
+                "examples": {
+                  "CaseDetailPresenterDTO": {
+                    "value": {
+                      "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                      "target_type": "listing",
+                      "target_key": "412",
+                      "scope_key": "",
+                      "origin": "report",
+                      "state": "queued",
+                      "severity": 3,
+                      "report_count": 2,
+                      "subject_user_id": "5cc26b64-0717-4562-b3fc-2c963f66a001",
+                      "claimed_by": null,
+                      "claimed_until": null,
+                      "created_at": "2026-08-21T10:00:00+00:00",
+                      "updated_at": "2026-08-21T10:05:00+00:00",
+                      "resolved_at": null,
+                      "reports": [],
+                      "verdicts": [],
+                      "sanctions": [],
+                      "appeals": []
+                    }
+                  }
+                }
+              }
+            },
+            "description": ""
+          }
+        }
+      }
+    },
+    "/moderation/api/v1/cases/{case_id}/claim": {
+      "post": {
+        "operationId": "moderation_api_v1_cases_claim_create",
+        "description": "Take a lease on a case.\n\n**Permissions:** `HasModerationMandate_case_claim`",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "tags": [
+          "Moderation / queue"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CasePresenterDTO"
+                },
+                "examples": {
+                  "CasePresenterDTO": {
+                    "value": {
+                      "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                      "target_type": "listing",
+                      "target_key": "412",
+                      "scope_key": "",
+                      "origin": "report",
+                      "state": "queued",
+                      "severity": 3,
+                      "report_count": 12,
+                      "subject_user_id": "5cc26b64-0717-4562-b3fc-2c963f66a001",
+                      "claimed_by": null,
+                      "claimed_until": null,
+                      "last_decision": "",
+                      "first_reported_at": "2026-08-21T10:00:00+00:00",
+                      "created_at": "2026-08-21T10:00:00+00:00",
+                      "updated_at": "2026-08-21T10:05:00+00:00",
+                      "resolved_at": null
+                    }
+                  }
+                }
+              }
+            },
+            "description": ""
+          }
+        }
+      }
+    },
+    "/moderation/api/v1/cases/{case_id}/events": {
+      "get": {
+        "operationId": "moderation_api_v1_cases_events_list",
+        "description": "The append-only audit trail of one case. Read-only, by declaration.\n\n**Permissions:** `HasModerationMandate_audit_view`",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "tags": [
+          "Moderation / queue"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CaseEventPresenterDTO"
+                  }
+                },
+                "examples": {
+                  "CaseEventPresenterDTO": {
+                    "value": [
+                      {
+                        "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                        "kind": "state_changed",
+                        "from_state": "screening",
+                        "to_state": "queued",
+                        "actor_id": null,
+                        "payload": {
+                          "reason_code": "screening_unavailable"
+                        },
+                        "created_at": "2026-08-21T10:00:00+00:00"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "description": ""
+          }
+        }
+      }
+    },
+    "/moderation/api/v1/cases/{case_id}/release": {
+      "post": {
+        "operationId": "moderation_api_v1_cases_release_create",
+        "description": "Hand a claimed case back to the queue.\n\n**Permissions:** `HasModerationMandate_case_claim`",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "tags": [
+          "Moderation / queue"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CasePresenterDTO"
+                },
+                "examples": {
+                  "CasePresenterDTO": {
+                    "value": {
+                      "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                      "target_type": "listing",
+                      "target_key": "412",
+                      "scope_key": "",
+                      "origin": "report",
+                      "state": "queued",
+                      "severity": 3,
+                      "report_count": 12,
+                      "subject_user_id": "5cc26b64-0717-4562-b3fc-2c963f66a001",
+                      "claimed_by": null,
+                      "claimed_until": null,
+                      "last_decision": "",
+                      "first_reported_at": "2026-08-21T10:00:00+00:00",
+                      "created_at": "2026-08-21T10:00:00+00:00",
+                      "updated_at": "2026-08-21T10:05:00+00:00",
+                      "resolved_at": null
+                    }
+                  }
+                }
+              }
+            },
+            "description": ""
+          }
+        }
+      }
+    },
+    "/moderation/api/v1/cases/{case_id}/rescan": {
+      "post": {
+        "operationId": "moderation_api_v1_cases_rescan_create",
+        "description": "Send a case back through the automatic screener.\n\n**Permissions:** `HasModerationMandate_case_rescan`",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "tags": [
+          "Moderation / queue"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RescanResultDTO"
+                }
+              }
+            },
+            "description": ""
+          }
+        }
+      }
+    },
+    "/moderation/api/v1/cases/{case_id}/verdict": {
+      "post": {
+        "operationId": "moderation_api_v1_cases_verdict_create",
+        "description": "Decide a case — and, in the same act, sanction its author.\n\n\"Take it down, suspend the seller, tell them why\" is one request and one\ntransaction. In legacy it was three screens, two of which wrote nothing to\nthe audit log.\n\n**Permissions:** `HasModerationMandate_case_resolve`",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "tags": [
+          "Moderation / queue"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerdictRequest"
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/VerdictRequest"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/VerdictRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerdictPresenterDTO"
+                },
+                "examples": {
+                  "VerdictPresenterDTO": {
+                    "value": {
+                      "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                      "decision": "rejected",
+                      "source": "llm",
+                      "reason_code": "illegal",
+                      "note": "Offers a controlled substance.",
+                      "confidence": 0.93,
+                      "actor_id": null,
+                      "model": "medium@prompt1",
+                      "evidence": {
+                        "excerpt": "...",
+                        "media_refs": [],
+                        "matched_rules": []
+                      },
+                      "created_at": "2026-08-21T10:00:00+00:00"
+                    }
+                  }
+                }
+              }
+            },
+            "description": ""
+          }
+        }
+      }
+    },
+    "/moderation/api/v1/policy": {
+      "get": {
+        "operationId": "moderation_api_v1_policy_retrieve",
+        "description": "DSA Art. 15(1)(e) — how this deployment moderates, generated from code.\n\nPublic on purpose: a transparency disclosure that requires an account is\nnot one. Nothing here is per-user, and everything in it is derivable from\nthe registries and settings anyway.\n\n**Permissions:** `AllowAny`",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "lang",
+            "schema": {
+              "type": "string"
+            },
+            "description": "BCP-47 tag (annotation only)."
+          },
+          {
+            "in": "query",
+            "name": "target_type",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Narrow to one target type."
+          }
+        ],
+        "tags": [
+          "Moderation / policy"
+        ],
+        "security": [
+          {}
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyDisclosureDTO"
+                }
+              }
+            },
+            "description": ""
+          }
+        }
+      }
+    },
+    "/moderation/api/v1/reports/": {
+      "get": {
+        "operationId": "moderation_api_v1_reports_list",
+        "description": "File a complaint, or list the ones you filed.\n\n**Permissions:** `IsNotAnonymousUser`",
+        "tags": [
+          "Moderation / reports"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ReportPresenterDTO"
+                  }
+                },
+                "examples": {
+                  "ReportPresenterDTO": {
+                    "value": [
+                      {
+                        "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                        "reason_code": "fraud",
+                        "description": "Asks for payment by bank transfer off-platform.",
+                        "good_faith": true,
+                        "reporter_id": "5cc26b64-0717-4562-b3fc-2c963f66a001",
+                        "created_at": "2026-08-21T10:00:00+00:00"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "description": ""
+          }
+        }
+      },
+      "post": {
+        "operationId": "moderation_api_v1_reports_create",
+        "description": "File a complaint, or list the ones you filed.\n\n**Permissions:** `IsNotAnonymousUser`",
+        "tags": [
+          "Moderation / reports"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportCreate"
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportCreate"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportResultDTO"
+                }
+              }
+            },
+            "description": ""
+          }
+        }
+      }
+    },
+    "/moderation/api/v1/sanctions": {
+      "get": {
+        "operationId": "moderation_api_v1_sanctions_list",
+        "description": "List sanctions, or issue one outside a verdict.\n\n**Permissions:** `HasModerationMandate_sanction_view`",
+        "tags": [
+          "Moderation / sanctions"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SanctionPresenterDTO"
+                  }
+                },
+                "examples": {
+                  "SanctionPresenterDTO": {
+                    "value": [
+                      {
+                        "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                        "case_id": "9aa1e5b0-0000-4000-8000-000000000001",
+                        "subject_user_id": "5cc26b64-0717-4562-b3fc-2c963f66a001",
+                        "kind": "suspended",
+                        "scope": "*",
+                        "reason_code": "fraud",
+                        "note": "Third offence.",
+                        "state": "active",
+                        "starts_at": "2026-08-21T10:00:00+00:00",
+                        "expires_at": "2026-09-20T10:00:00+00:00",
+                        "issued_by": "1111e5b0-0000-4000-8000-000000000001",
+                        "lifted_by": null,
+                        "lifted_at": null
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "description": ""
+          }
+        }
+      },
+      "post": {
+        "operationId": "moderation_api_v1_sanctions_create",
+        "description": "List sanctions, or issue one outside a verdict.\n\n**Permissions:** `HasModerationMandate_sanction_view`",
+        "tags": [
+          "Moderation / sanctions"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SanctionCreate"
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/SanctionCreate"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/SanctionCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SanctionPresenterDTO"
+                },
+                "examples": {
+                  "SanctionPresenterDTO": {
+                    "value": {
+                      "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                      "case_id": "9aa1e5b0-0000-4000-8000-000000000001",
+                      "subject_user_id": "5cc26b64-0717-4562-b3fc-2c963f66a001",
+                      "kind": "suspended",
+                      "scope": "*",
+                      "reason_code": "fraud",
+                      "note": "Third offence.",
+                      "state": "active",
+                      "starts_at": "2026-08-21T10:00:00+00:00",
+                      "expires_at": "2026-09-20T10:00:00+00:00",
+                      "issued_by": "1111e5b0-0000-4000-8000-000000000001",
+                      "lifted_by": null,
+                      "lifted_at": null
+                    }
+                  }
+                }
+              }
+            },
+            "description": ""
+          }
+        }
+      }
+    },
+    "/moderation/api/v1/sanctions/{sanction_id}/lift": {
+      "post": {
+        "operationId": "moderation_api_v1_sanctions_lift_create",
+        "description": "Revoke an active sanction.\n\n**Permissions:** `HasModerationMandate_sanction_lift`",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sanction_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "tags": [
+          "Moderation / sanctions"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SanctionLift"
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/SanctionLift"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/SanctionLift"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SanctionPresenterDTO"
+                },
+                "examples": {
+                  "SanctionPresenterDTO": {
+                    "value": {
+                      "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                      "case_id": "9aa1e5b0-0000-4000-8000-000000000001",
+                      "subject_user_id": "5cc26b64-0717-4562-b3fc-2c963f66a001",
+                      "kind": "suspended",
+                      "scope": "*",
+                      "reason_code": "fraud",
+                      "note": "Third offence.",
+                      "state": "active",
+                      "starts_at": "2026-08-21T10:00:00+00:00",
+                      "expires_at": "2026-09-20T10:00:00+00:00",
+                      "issued_by": "1111e5b0-0000-4000-8000-000000000001",
+                      "lifted_by": null,
+                      "lifted_at": null
+                    }
+                  }
+                }
+              }
+            },
+            "description": ""
+          }
+        }
+      }
+    },
+    "/moderation/api/v1/stats": {
+      "get": {
+        "operationId": "moderation_api_v1_stats_retrieve",
+        "description": "Queue counters — the console header and DSA Art. 24(1) reporting.\n\n**Permissions:** `HasModerationMandate_queue_view`",
+        "tags": [
+          "Moderation / queue"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatsDTO"
+                }
+              }
+            },
+            "description": ""
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AppealCreate": {
+        "type": "object",
+        "properties": {
+          "case_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 10000
+          },
+          "sanction_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          }
+        },
+        "required": [
+          "body",
+          "case_id"
+        ]
+      },
+      "AppealPresenterDTO": {
+        "type": "object",
+        "description": "Presents one appeal.",
+        "properties": {
+          "body": {
+            "type": "string",
+            "description": "body"
+          },
+          "state": {
+            "type": "string",
+            "description": "state"
+          },
+          "resolution_note": {
+            "type": "string",
+            "description": "resolution note"
+          },
+          "id": {
+            "type": "string"
+          },
+          "case_id": {
+            "type": "string"
+          },
+          "appellant_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "sanction_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "resolved_by": {
+            "type": "string",
+            "nullable": true
+          },
+          "resolved_at": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "appellant_id",
+          "body",
+          "case_id",
+          "created_at",
+          "id",
+          "resolution_note",
+          "state"
+        ]
+      },
+      "AppealResolve": {
+        "type": "object",
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "maxLength": 16
+          },
+          "note": {
+            "type": "string",
+            "default": "",
+            "maxLength": 5000
+          },
+          "reason_code": {
+            "type": "string",
+            "default": "",
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "CaseDetailPresenterDTO": {
+        "type": "object",
+        "description": "Presents one case card: the case, its complaints and its verdicts.\n\nThe target's live CONTENT is not here — it is fetched by the view through\n``content_function`` and attached as its own envelope, because a read that\ncan fail must be able to say so without failing the whole card.",
+        "properties": {
+          "target_type": {
+            "type": "string",
+            "description": "target type"
+          },
+          "target_key": {
+            "type": "string",
+            "description": "target key"
+          },
+          "scope_key": {
+            "type": "string",
+            "description": "scope key"
+          },
+          "origin": {
+            "type": "string",
+            "description": "origin"
+          },
+          "state": {
+            "type": "string",
+            "description": "state"
+          },
+          "severity": {
+            "type": "integer",
+            "description": "severity"
+          },
+          "id": {
+            "type": "string"
+          },
+          "report_count": {
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "reports": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReportPresenterDTO"
+            }
+          },
+          "verdicts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VerdictPresenterDTO"
+            }
+          },
+          "sanctions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SanctionPresenterDTO"
+            }
+          },
+          "appeals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AppealPresenterDTO"
+            }
+          },
+          "subject_user_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "claimed_by": {
+            "type": "string",
+            "nullable": true
+          },
+          "claimed_until": {
+            "type": "string",
+            "nullable": true
+          },
+          "resolved_at": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "appeals",
+          "created_at",
+          "id",
+          "origin",
+          "report_count",
+          "reports",
+          "sanctions",
+          "scope_key",
+          "severity",
+          "state",
+          "target_key",
+          "target_type",
+          "updated_at",
+          "verdicts"
+        ]
+      },
+      "CaseEventPresenterDTO": {
+        "type": "object",
+        "description": "Presents one audit row. Read-only everywhere, by declaration.",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "kind"
+          },
+          "from_state": {
+            "type": "string",
+            "description": "from state"
+          },
+          "to_state": {
+            "type": "string",
+            "description": "to state"
+          },
+          "id": {
+            "type": "string"
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "actor_id": {
+            "type": "string",
+            "nullable": true,
+            "description": "Null means the system acted."
+          }
+        },
+        "required": [
+          "created_at",
+          "from_state",
+          "id",
+          "kind",
+          "payload",
+          "to_state"
+        ]
+      },
+      "CasePresenterDTO": {
+        "type": "object",
+        "description": "Presents one row of the cross-target moderator queue.",
+        "properties": {
+          "target_type": {
+            "type": "string",
+            "description": "target type"
+          },
+          "target_key": {
+            "type": "string",
+            "description": "target key"
+          },
+          "scope_key": {
+            "type": "string",
+            "description": "scope key"
+          },
+          "origin": {
+            "type": "string",
+            "description": "origin"
+          },
+          "state": {
+            "type": "string",
+            "description": "state"
+          },
+          "severity": {
+            "type": "integer",
+            "description": "severity"
+          },
+          "id": {
+            "type": "string"
+          },
+          "report_count": {
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "subject_user_id": {
+            "type": "string",
+            "nullable": true,
+            "description": "Author of the moderated content, learned from content_function."
+          },
+          "claimed_by": {
+            "type": "string",
+            "nullable": true
+          },
+          "claimed_until": {
+            "type": "string",
+            "nullable": true,
+            "description": "Lease expiry; past it the case returns to the queue."
+          },
+          "last_decision": {
+            "type": "string"
+          },
+          "first_reported_at": {
+            "type": "string",
+            "nullable": true
+          },
+          "resolved_at": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "created_at",
+          "id",
+          "origin",
+          "report_count",
+          "scope_key",
+          "severity",
+          "state",
+          "target_key",
+          "target_type",
+          "updated_at"
+        ]
+      },
+      "PolicyDisclosureDTO": {
+        "type": "object",
+        "description": "DSA Art. 15(1)(e) — what this deployment actually does, from the code.",
+        "properties": {
+          "lang": {
+            "type": "string"
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {}
+            }
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {}
+            }
+          },
+          "automated_means": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "human_review": {
+            "type": "object",
+            "additionalProperties": {}
+          }
+        }
+      },
+      "ReportCreate": {
+        "type": "object",
+        "description": "A complaint (DSA Art. 16(2)).\n\n``good_faith`` is the Art. 16(2)(d) declaration and defaults to False:\na checkbox nobody ticked is a checkbox nobody ticked. Whether\n``description`` is required depends on the reason's\n``requires_description``, which is a registry question and is therefore\nanswered in the service, not here — and, unlike legacy, an unwanted\ndescription is never silently erased.",
+        "properties": {
+          "target_type": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "target_key": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "reason_code": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "description": {
+            "type": "string",
+            "default": "",
+            "maxLength": 5000
+          },
+          "good_faith": {
+            "type": "boolean",
+            "default": false
+          },
+          "contact_email": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "email",
+                "default": ""
+              },
+              {
+                "type": "string",
+                "maxLength": 0
+              }
+            ]
+          },
+          "scope_key": {
+            "type": "string",
+            "default": "",
+            "maxLength": 255
+          }
+        },
+        "required": [
+          "reason_code",
+          "target_key",
+          "target_type"
+        ]
+      },
+      "ReportPresenterDTO": {
+        "type": "object",
+        "description": "Presents one complaint to a moderator.",
+        "properties": {
+          "reason_code": {
+            "type": "string",
+            "description": "reason code"
+          },
+          "description": {
+            "type": "string",
+            "description": "description"
+          },
+          "good_faith": {
+            "type": "boolean",
+            "description": "good faith"
+          },
+          "id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "reporter_id": {
+            "type": "string",
+            "nullable": true,
+            "description": "Null once the reporter's account was erased."
+          }
+        },
+        "required": [
+          "created_at",
+          "description",
+          "good_faith",
+          "id",
+          "reason_code"
+        ]
+      },
+      "ReportResultDTO": {
+        "type": "object",
+        "description": "The whole answer to an accepted complaint.\n\nCarries ``case_ref`` (a short prefix) rather than the case id: the\nreporter needs something to quote at support, not a handle to a resource\nthey may not read.",
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "report_id": {
+            "type": "string"
+          },
+          "case_ref": {
+            "type": "string"
+          }
+        }
+      },
+      "RescanResultDTO": {
+        "type": "object",
+        "description": "RescanResultDTO(case_id: 'str', state: 'str', task_id: 'Optional[str]' = None)",
+        "properties": {
+          "case_id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "task_id": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "case_id",
+          "state"
+        ]
+      },
+      "SanctionCreate": {
+        "type": "object",
+        "description": "A sanction issued on its own, outside a verdict.\n\n``case_id`` is optional in the request and mandatory in the model: when\nit is absent the service opens a ``manual`` case so the sanction still\nhas exactly one audit trail behind it.",
+        "properties": {
+          "subject_user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "maxLength": 24
+          },
+          "reason_code": {
+            "type": "string",
+            "default": "",
+            "maxLength": 64
+          },
+          "note": {
+            "type": "string",
+            "default": "",
+            "maxLength": 5000
+          },
+          "duration_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "nullable": true
+          },
+          "scope": {
+            "type": "string",
+            "default": "*",
+            "maxLength": 255
+          },
+          "case_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "target_type": {
+            "type": "string",
+            "default": "",
+            "maxLength": 64
+          },
+          "target_key": {
+            "type": "string",
+            "default": "",
+            "maxLength": 255
+          }
+        },
+        "required": [
+          "kind",
+          "subject_user_id"
+        ]
+      },
+      "SanctionLift": {
+        "type": "object",
+        "properties": {
+          "note": {
+            "type": "string",
+            "default": "",
+            "maxLength": 5000
+          }
+        }
+      },
+      "SanctionPresenterDTO": {
+        "type": "object",
+        "description": "Presents one account-level consequence.",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "kind"
+          },
+          "scope": {
+            "type": "string",
+            "description": "scope"
+          },
+          "reason_code": {
+            "type": "string",
+            "description": "reason code"
+          },
+          "note": {
+            "type": "string",
+            "description": "note"
+          },
+          "state": {
+            "type": "string",
+            "description": "state"
+          },
+          "id": {
+            "type": "string"
+          },
+          "case_id": {
+            "type": "string"
+          },
+          "subject_user_id": {
+            "type": "string"
+          },
+          "starts_at": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string",
+            "nullable": true,
+            "description": "Null means indefinite."
+          },
+          "issued_by": {
+            "type": "string",
+            "nullable": true
+          },
+          "lifted_by": {
+            "type": "string",
+            "nullable": true
+          },
+          "lifted_at": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "case_id",
+          "id",
+          "kind",
+          "note",
+          "reason_code",
+          "scope",
+          "starts_at",
+          "state",
+          "subject_user_id"
+        ]
+      },
+      "SanctionRequest": {
+        "type": "object",
+        "description": "The optional sanction attached to a verdict.",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "maxLength": 24
+          },
+          "duration_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "nullable": true
+          },
+          "scope": {
+            "type": "string",
+            "default": "*",
+            "maxLength": 255
+          },
+          "reason_code": {
+            "type": "string",
+            "default": "",
+            "maxLength": 64
+          },
+          "note": {
+            "type": "string",
+            "default": "",
+            "maxLength": 5000
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "StatsDTO": {
+        "type": "object",
+        "description": "Queue counters for the console header and DSA Art. 24(1) reporting.",
+        "properties": {
+          "by_state": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "by_target_type": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "by_severity": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "open_total": {
+            "type": "integer"
+          },
+          "resolved_total": {
+            "type": "integer"
+          }
+        }
+      },
+      "VerdictPresenterDTO": {
+        "type": "object",
+        "description": "Presents one append-only decision.",
+        "properties": {
+          "decision": {
+            "type": "string",
+            "description": "decision"
+          },
+          "source": {
+            "type": "string",
+            "description": "source"
+          },
+          "reason_code": {
+            "type": "string",
+            "description": "reason code"
+          },
+          "note": {
+            "type": "string",
+            "description": "note"
+          },
+          "confidence": {
+            "type": "number",
+            "format": "double",
+            "description": "confidence"
+          },
+          "model": {
+            "type": "string",
+            "description": "model"
+          },
+          "id": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "actor_id": {
+            "type": "string",
+            "nullable": true,
+            "description": "Null for a machine verdict."
+          }
+        },
+        "required": [
+          "confidence",
+          "created_at",
+          "decision",
+          "evidence",
+          "id",
+          "model",
+          "note",
+          "reason_code",
+          "source"
+        ]
+      },
+      "VerdictRequest": {
+        "type": "object",
+        "description": "A moderator's decision, optionally with the consequence in one act.\n\n\"Take it down AND suspend the seller AND tell them why\" is one button in\nthe console and one transaction here; legacy needed three screens and\nrecorded two of them nowhere.",
+        "properties": {
+          "decision": {
+            "type": "string",
+            "maxLength": 16
+          },
+          "reason_code": {
+            "type": "string",
+            "default": "",
+            "maxLength": 64
+          },
+          "note": {
+            "type": "string",
+            "default": "",
+            "maxLength": 5000
+          },
+          "sanction": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SanctionRequest"
+              }
+            ],
+            "nullable": true
+          }
+        },
+        "required": [
+          "decision"
+        ]
+      }
+    },
+    "securitySchemes": {
+      "JWTCookieAuth": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "stapel_jwt",
+        "description": "JWT token stored in cookie. Login via /auth/admin/ to get the cookie."
+      }
+    }
+  }
+}

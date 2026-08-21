@@ -341,10 +341,18 @@ class CaseDetailPresenter(Presenter):
         "resolved_at": PresenterField(
             type=Optional[str], source=lambda dao: _iso(dao.resolved_at), default=None
         ),
-        "reports": PresenterField(type=ReportPresenter, many=True, source="reports"),
-        "verdicts": PresenterField(type=VerdictPresenter, many=True, source="verdicts"),
-        "sanctions": PresenterField(type=SanctionPresenter, many=True, source="sanctions"),
-        "appeals": PresenterField(type=AppealPresenter, many=True, source="appeals"),
+        "reports": PresenterField(
+            type=ReportPresenter, many=True, source=lambda dao: dao.reports.all()
+        ),
+        "verdicts": PresenterField(
+            type=VerdictPresenter, many=True, source=lambda dao: dao.verdicts.all()
+        ),
+        "sanctions": PresenterField(
+            type=SanctionPresenter, many=True, source=lambda dao: dao.sanctions.all()
+        ),
+        "appeals": PresenterField(
+            type=AppealPresenter, many=True, source=lambda dao: dao.appeals.all()
+        ),
     }
 
 

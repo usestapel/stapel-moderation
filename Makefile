@@ -22,20 +22,24 @@ PYTHON ?= python3
 # Emit the contract triad + capabilities.json + llms.txt, then assemble
 # README.md from docs/readme.md plus everything above.
 #
-# The llms.txt budget is raised from the generator's default 4000 to 5000,
-# the same exception stapel-recordings (5000), stapel-workspaces (4500) and
-# stapel-auth (8000) already take. The measured document is ~4710 tokens,
-# and the bulk of it is the 31-entry usage surface plus the 21-key error
-# catalogue — a service-layer library whose whole point is that callers use
-# its functions instead of writing their own version of them. Raise the
-# ceiling deliberately; do NOT shorten the `intent` lines in
+# The llms.txt budget is raised from the generator's default 4000 to 7000 —
+# above the 5000 that stapel-forms and stapel-recordings take, below
+# stapel-auth's 8000. The measured document is ~6350 tokens and the bulk of
+# it is the 56-entry usage surface (2740) plus the 27-key error catalogue
+# (912) plus 11 config axes (1105). That size is the module, not padding: a
+# moderation service whose whole contract is "call these services instead of
+# writing your own version of them" has a large surface by construction, and
+# the axes are the settings that decide whether unscreened content reaches
+# the public.
+#
+# Raise the ceiling deliberately; do NOT shorten the `intent` lines in
 # docs/capabilities.meta.json to fit, because a trimmed context file reads
-# exactly like a complete one at the point of use, which is the failure
-# mode the hard budget exists to prevent.
+# exactly like a complete one at the point of use, which is the failure mode
+# the hard budget exists to prevent.
 contract:
 	$(PYTHON) -m stapel_moderation._codegen --out docs
 	$(PYTHON) -m stapel_moderation._capabilities --out docs
-	$(PYTHON) -m stapel_tools.llms_txt . --out docs --budget 5000
+	$(PYTHON) -m stapel_tools.llms_txt . --out docs --budget 7000
 	$(PYTHON) -m stapel_tools.readme .
 
 # Drift gate: regenerate into a temp dir and diff against the committed docs/*.
@@ -43,7 +47,7 @@ contract-check:
 	@tmp=$$(mktemp -d); \
 	$(PYTHON) -m stapel_moderation._codegen --out "$$tmp" || { rm -rf "$$tmp"; exit 1; }; \
 	$(PYTHON) -m stapel_moderation._capabilities --out "$$tmp" || { rm -rf "$$tmp"; exit 1; }; \
-	$(PYTHON) -m stapel_tools.llms_txt . --out "$$tmp" --budget 5000 || { rm -rf "$$tmp"; exit 1; }; \
+	$(PYTHON) -m stapel_tools.llms_txt . --out "$$tmp" --budget 7000 || { rm -rf "$$tmp"; exit 1; }; \
 	rc=0; \
 	for f in schema.json flows.json errors.json capabilities.json llms.txt; do \
 		if ! diff -q "docs/$$f" "$$tmp/$$f" >/dev/null 2>&1; then \

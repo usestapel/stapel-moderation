@@ -9,7 +9,7 @@ description = "Target-generic moderation queue: reports, verdicts, sanctions and
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
-keywords = ["django", "stapel", "moderation"]
+keywords = ["django", "stapel", "moderation", "trust-and-safety", "dsa"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Framework :: Django",
@@ -23,7 +23,18 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "stapel-core>=0.29.0,<1.0",
+    # Floor 0.32.0: the module stands on comm Tasks (the screening retry
+    # ladder), the Projection primitive with its two modes, the staff-mandate
+    # access declarations, and the cross-service user blacklist this module
+    # is the first producer of.
+    #
+    # `stapel-agent` is deliberately NOT a dependency. The LLM is reached by
+    # the string name `llm.complete` over comm, so a deployment without an
+    # agent must still boot — in it, ON_SCREENING_UNAVAILABLE sends every case
+    # to the human queue. The prompt-injection sanitizer is the one thing
+    # imported from it, lazily and inside the default screener, because the
+    # screener is a replaceable seam rather than a hard edge.
+    "stapel-core>=0.32.0,<1.0",
 ]
 
 [project.urls]
@@ -45,7 +56,23 @@ packages = ["stapel_moderation", "stapel_moderation.migrations"]
 # `stapel-catalog --from-installed` possible, i.e. what turns catalog
 # freshness from somebody's discipline into a property of the lockfile.
 # A module that keeps them repo-only publishes code an agent cannot read.
-stapel_moderation = ["py.typed", "docs/capabilities.json", "docs/flows.json", "docs/errors.json", "CONFIG.MD", "migrations/*.py", "schemas/**/*.json"]
+# Both stapel-docs packaging gotchas are closed here by construction:
+# docs/schema.json IS listed (a wheel without it makes
+# `stapel-catalog --from-installed` read off somebody's discipline instead of
+# the lockfile), and the translations/ catalogues listed below are real files
+# in the tree rather than a pattern matching nothing.
+stapel_moderation = [
+    "py.typed",
+    "docs/schema.json",
+    "docs/flows.json",
+    "docs/errors.json",
+    "docs/capabilities.json",
+    "docs/llms.txt",
+    "CONFIG.MD",
+    "migrations/*.py",
+    "schemas/**/*.json",
+    "translations/*.json",
+]
 
 [tool.ruff]
 target-version = "py311"

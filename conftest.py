@@ -100,6 +100,27 @@ def api_client():
 
 
 @pytest.fixture
+def client_for():
+    """``client_for(user)`` — a FRESH client per actor.
+
+    Not a convenience: several tests act as two or three people in one
+    scenario (a reporter, the moderator who decided, the second moderator who
+    hears the appeal), and re-authenticating one shared client silently
+    changes who every earlier handle is. That produced a real false failure
+    while this suite was being written.
+    """
+    from rest_framework.test import APIClient
+
+    def _make(user=None):
+        client = APIClient()
+        if user is not None:
+            client.force_authenticate(user=user)
+        return client
+
+    return _make
+
+
+@pytest.fixture
 def user(db):
     from django.contrib.auth import get_user_model
 

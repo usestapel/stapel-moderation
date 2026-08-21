@@ -365,7 +365,7 @@ def open_case(
         return case, False
 
     _log(case, CaseEventKind.CREATED, actor_id=actor_id, origin=origin)
-    events.emit_case_opened(case, emit_event=emit_event)
+    events.emit_case_opened(case, emit_event=emit_event)  # emit-check: ok — open_case is documented as callable only inside the caller's mutate_and_emit block, and `emit_event` is that caller's handle
     return case, True
 
 
@@ -626,7 +626,7 @@ def resolve_case(
 
         verdict_topic = policy["verdict_event"]
         if verdict_topic:
-            events.emit_moderation_completed(
+            events.emit_moderation_completed(  # emit-check: ok — inside the _emitting() block opened at the top of resolve_case
                 case, verdict, topic=verdict_topic, emit_event=emit_event
             )
         if decision in TERMINAL_DECISIONS:
@@ -636,7 +636,7 @@ def resolve_case(
             # just asked for a human — and it would burn the notification
             # cooldown, so the real outcome letter would never be sent.
             for report_id in case.reports.values_list("id", flat=True):
-                events.emit_report_reviewed(
+                events.emit_report_reviewed(  # emit-check: ok — inside the _emitting() block opened at the top of resolve_case
                     str(report_id), case, decision, emit_event=emit_event
                 )
     return verdict
@@ -782,7 +782,7 @@ def issue_sanction(
             # collision is a TypeError rather than a shadowed payload key.
             sanction_kind=kind,
         )
-        events.emit_sanction_issued(sanction, emit_event=emit_event)
+        events.emit_sanction_issued(sanction, emit_event=emit_event)  # emit-check: ok — inside the _emitting() block opened at the top of issue_sanction
 
     apply_sanction_enforcement(sanction)
     return sanction

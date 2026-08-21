@@ -1,0 +1,284 @@
+# stapel-moderation 0.1.0
+
+The fleet's single producer of moderation verdicts: one target-generic queue over listings, reviews, chat messages and profiles, keyed by an opaque (target_type, target_key) and driven by a host-registered policy per type. One Case per target however many people complain, one status vocabulary in the whole module, an append-only Verdict and an append-only CaseEvent audit trail whose mutations are FORBIDDEN by mandate declaration. Screening is a comm-Task (deterministic rules, then schema-constrained llm.complete) with a closed hold-for-a-human default when the automation cannot answer. Resolution ACTS on the target by emitting moderation.completed, which stapel-listings and stapel-reviews already consume. Sanctions carry a kind, a scope, a reason, a clock, an appeal and an audit trail, and they bite through core's cross-service user blacklist — the hook every request path already checked and nobody had ever called. Plus DSA artefacts generated from the registries: a public policy disclosure, a statement of reasons on every takedown, an acknowledgement to every complainant, and an internal appeal heard by a different moderator.
+
+Contract: axes 11 · surface 56 · extension points 6 · operations 18 · error codes 69.
+Generated from docs/capabilities.json by `stapel-llms-txt` — do not edit; drift-gated by `make contract-check`.
+
+## Configuration axes — what a product switches on
+Settings keys; `default` is what you get by saying nothing. Turning an axis off unmounts the operations it gates.
+- ALLOW_ANONYMOUS_REPORTS [bool, default false] — Let signed-out visitors report content
+  Off. Opening it makes a contact address mandatory on every report (the notice-and-action regime wants a way to answer the submitter) and demands a captcha, because a flood of anonymous complaints is a denial-of-service against the moderation queue itself. The price of keeping it closed is stated plainly: some real violations will go unreported.
+- APPEAL_REQUIRES_DIFFERENT_ACTOR [bool, default true] — Appeals heard by a second person
+  On. The moderator who decided a case cannot decide the appeal against it — an internal complaint system heard by the same person is a formality. A team with one moderator turns it off knowingly rather than discovering that its appeals rubber-stamp themselves.
+- AUTO_RESOLVE_STALE_QUEUE [enum, default null] — Auto-approve cases nobody reviewed
+  Off, and the setting mostly exists so that 'we do not do this' is something an auditor can read. The predecessor system swept every unreviewed case — including the ones its model had explicitly flagged for a human — into automatic approval every five minutes, which meant human review existed on the org chart and nowhere else. Setting a number here prints a startup warning.
+- ON_SCREENING_FAILURE [enum, default "hold"] — What happens when the automatic reviewer is down
+  Hold: the case goes to the human queue and nothing is published without a decision. The alternatives exist and are named — approve trades safety for availability, reject trades the other way — and choosing either prints a startup warning saying so, because the predecessor system published unmoderated listings roughly half an hour after its model went down and nothing anywhere said that was happening.
+- ON_SCREENING_UNAVAILABLE [enum, default "hold"] — What happens with no automatic reviewer configured at all
+  Hold, same vocabulary as above, for the deployment that never had a model rather than one whose model is temporarily down. The human queue is the fallback in both cases.
+- RETENTION_DAYS [enum, default 365] — How long a closed case is kept
+  365 days — a full annual reporting cycle, so a statement of reasons stays checkable for as long as anybody may ask about it. A short excerpt of the content is kept with the verdict for the same reason: a decision has to remain reviewable after the content it was about is gone.
+- SANCTION_RETENTION_DAYS [enum, default 1095] — How long an account penalty is remembered
+  1095 days, deliberately longer than the case that produced it. Penalties escalate with repetition, so the memory IS the mechanism — a record that forgets makes every third offence a first one. A case with a surviving penalty is never purged out from under it.
+- SCREENER [enum, default "stapel_moderation.screening.default_screener"] — Who does the automatic review
+  The shipped rules-then-model ladder. A product with its own classifier replaces the whole stage by naming its callable here — the extension point exists so that bringing your own model is configuration rather than a fork.
+- SCREEN_ENABLED [bool, default true] — Automatic first-pass review
+  On. Every case is first seen by a deterministic rule set and then, if nothing matched, by a language model answering a fixed schema. Turning it off is the honest configuration for a deployment with no model available: every case then goes straight to a person, and nothing is published without a decision.
+- TARGET_TYPES [enum, default {}] — What can be moderated
+  Empty out of the box: the module ships knowing nothing about listings, reviews or profiles, and a host declares each kind with a policy saying where its content is read from and how a verdict reaches it. That is what lets one queue and one moderator console serve every kind of content a product has, instead of one review screen per feature.
+- WORKSPACE_SCOPED [bool, default false] — Per-tenant moderation permissions
+  Off, declared and closed. The queue already partitions by an opaque tenant key, and neither listings nor reviews are tenant-keyed today, so the capability door would add a lock with nothing behind it. The capability names are published on day one so that a product's role definitions never have to be migrated when it opens.
+
+## Usage surface — call these before writing your own
+This is the answer to "does Stapel already have something for X?". `instead of` names the outside symbol this one displaces.
+### gate_function
+- apply_sanction_enforcement — stapel_moderation.services.apply_sanction_enforcement
+  Set the blacklist key for a sanction whose kind calls for it. Deliberately outside the transaction: a cache write cannot be rolled back.
+- apply_screening_failure — stapel_moderation.tasks.apply_screening_failure
+  Apply the ON_SCREENING_FAILURE policy to a case whose screening was parked after exhausting its retries.
+- authorize — stapel_moderation.authz.authorize
+  instead of: an email allow-list of moderators, checking request.user.is_staff directly
+  The single authorization choke point of the moderator surface: one declared action in, allow/deny out, decided by the core staff mandate.
+- check_can_report — stapel_moderation.registry.check_can_report
+  Ask the type's can_report callback whether this reporter may file. Fail-OPEN when unset; a callback that raises blocks the write rather than defaulting to permissive.
+- check_can_view_content — stapel_moderation.registry.check_can_view_content
+  Ask the type's can_view_content callback about a moderator's read. Fail-OPEN by design — the caller already cleared the staff mandate, and blanking the card hides content from the person paid to look at it.
+- transition — stapel_moderation.services.transition
+  instead of: Case.state = ...; case.save()
+  Move a case along a DECLARED edge and audit it in the same transaction; an undeclared edge raises instead of being assigned.
+### predicate
+- active_sanctions — stapel_moderation.services.active_sanctions
+  instead of: Sanction.objects.filter(state='active')
+  Live sanctions for a user, optionally narrowed to one scope, with expiry evaluated in the query rather than trusted to the sweeper.
+- content_payload_key — stapel_moderation.registry.content_payload_key
+  The payload key a target's content_function expects its id under — the target module's own id name, not a generic one.
+- get_reasons — stapel_moderation.registry.get_reasons
+  The effective reason registry with every entry fully defaulted.
+- get_rules — stapel_moderation.registry.get_rules
+  The effective rule registry with every entry fully defaulted.
+- get_target_types — stapel_moderation.registry.get_target_types
+  The effective target-type registry: built-ins, then settings, then runtime, with None removing.
+- ladder_duration — stapel_moderation.services.ladder_duration
+  instead of: hardcoding 24h/7d/30d at a call site
+  How long the subject's NEXT sanction of a kind should last, per the configured progressive ladder.
+- list_appeals — stapel_moderation.services.list_appeals
+  One keyset page of appeals, for the moderator queue or for one appellant.
+- list_cases — stapel_moderation.services.list_cases
+  instead of: merging two querysets in Python and slicing the list
+  One keyset page of the cross-target queue — one table, one index, one LIMIT in the database.
+- list_reports — stapel_moderation.services.list_reports
+  One keyset page of a user's own complaints.
+- list_sanctions — stapel_moderation.services.list_sanctions
+  One keyset page of sanctions, optionally scoped to one subject or state.
+- policy_disclosure — stapel_moderation.services.policy_disclosure
+  The transparency disclosure, assembled from the registries and settings rather than kept as prose that drifts out of sync with what the system does.
+- queue_stats — stapel_moderation.services.queue_stats
+  Queue counters for the console header and for periodic transparency reporting.
+- reason_applies — stapel_moderation.registry.reason_applies
+  Whether a reason may be used against a given target type.
+- reasons_for_target — stapel_moderation.registry.reasons_for_target
+  The reasons a REPORTER may choose for a target type — the registry's own applies_to intersected with the policy's allowlist, never a system reason.
+- resolve_policy — stapel_moderation.registry.resolve_policy
+  instead of: policy.get('gate', 'post')
+  The fully-defaulted policy for a target type, or UnknownTargetType. Every key a call site reads is guaranteed present, so nothing guesses a default locally.
+- resolve_policy_lenient — stapel_moderation.registry.resolve_policy_lenient
+  The same, but an unregistered type yields a neutral policy. Staff-side only: a host that de-registers a type must not be able to strand the open cases about it.
+- resolve_reason — stapel_moderation.registry.resolve_reason
+  One resolved reason entry, or UnknownReason.
+- rules_for_target — stapel_moderation.registry.rules_for_target
+  Rules applicable to one target type, in stable code order.
+- sanction_snapshot — stapel_moderation.services.sanction_snapshot
+  The {allowed, sanctions} answer BOTH projection modes hand back — the one shape local and remote reads agree on.
+- sanctions_export — stapel_moderation.services.sanctions_export
+  The cursor-paged snapshot the sanction projection rebuilds from. Answers {rows, cursor, total} — an {items} shape would rebuild the table to empty and report success.
+- target_type_for_event — stapel_moderation.registry.target_type_for_event
+  Every registered target type whose intake_events names a given topic.
+### factory
+- claim_case — stapel_moderation.services.claim_case
+  Take a lease on a case. A live lease held by somebody else refuses, which is what stops two moderators silently working one report.
+- erase_user_reports — stapel_moderation.services.erase_user_reports
+  instead of: Report.objects.filter(...).delete()
+  Detach a user from their complaints and appeals, keeping the case, the counts and the platform's own compliance record.
+- expire_sanctions — stapel_moderation.tasks.expire_sanctions
+  Flip lapsed sanctions to expired, announce it, and stop enforcing them.
+- fetch_content — stapel_moderation.services.fetch_content
+  instead of: reading title/description out of an intake event payload
+  Read a target's LIVE content through its policy's content_function. The module stores no copy and reads nothing off the event, so this is the only way to see what is being moderated.
+- get_moderation_beat_schedule — stapel_moderation.tasks.get_moderation_beat_schedule
+  The beat entries for every scheduled job, on the configured cadences — so a host wires them all at once instead of remembering four names.
+- issue_sanction — stapel_moderation.services.issue_sanction
+  instead of: Sanction.objects.create, stapel_core.django.jwt.authentication.blacklist_user
+  Issue a sanction against an existing case, announce it, and make it bite through core's cross-service user blacklist.
+- issue_standalone_sanction — stapel_moderation.services.issue_standalone_sanction
+  Sanction a user outside a verdict and still leave exactly one audit trail — it opens a manual case rather than allowing a case-less ban.
+- lift_sanction — stapel_moderation.services.lift_sanction
+  instead of: unblacklist_user
+  Revoke an active sanction and stop enforcing it — without freeing a user who is still under another one.
+- open_appeal — stapel_moderation.services.open_appeal
+  instead of: Appeal.objects.create
+  Register an appeal against a resolved case (the internal complaint-handling system).
+- open_case — stapel_moderation.services.open_case
+  instead of: Case.objects.create, Case.objects.get_or_create
+  Find or open the live case for one target — the single entry point of all three intake paths, and where idempotency-by-state lives.
+- purge_expired_cases — stapel_moderation.tasks.purge_expired_cases
+  Destroy closed cases and lapsed sanctions past their two different retention horizons, never a case a live sanction still depends on.
+- queue_case — stapel_moderation.services.queue_case
+  Send a case to the human queue and announce it. Use when a host decides a person must look, whatever the automation said.
+- rearm_active_sanctions — stapel_moderation.tasks.rearm_active_sanctions
+  Re-set the enforcement key for every sanction that should still bite. Without it a long suspension silently stops being enforced when the cache key expires.
+- record_verdict — stapel_moderation.services.record_verdict
+  instead of: Verdict.objects.create, Verdict.save
+  Append one verdict row plus its audit entry. Never updates, never deletes.
+- register_reason — stapel_moderation.registry.register_reason
+  Add or remove a complaint reason at runtime.
+- register_rule — stapel_moderation.registry.register_rule
+  Add or remove a deterministic screening rule at runtime.
+- register_target_type — stapel_moderation.registry.register_target_type
+  Declare what may be moderated, at runtime. Also wires that type's intake subscriptions, so a type registered after boot is never a policy nobody listens to.
+- release_case — stapel_moderation.services.release_case
+  Hand a claimed case back to the queue and audit the release.
+- rescan_case — stapel_moderation.services.rescan_case
+  Send a case back through the automatic screener, reopening it first if it was already decided — the explicit 'look again' path.
+- reset_reasons — stapel_moderation.registry.reset_reasons
+  Tests only: drop runtime reason overrides.
+- reset_registries — stapel_moderation.registry.reset_registries
+  Tests only: drop every runtime override in one call.
+- reset_rules — stapel_moderation.registry.reset_rules
+  Tests only: drop runtime rule overrides.
+- reset_target_types — stapel_moderation.registry.reset_target_types
+  Tests only: drop runtime target-type overrides.
+- resolve_appeal — stapel_moderation.services.resolve_appeal
+  Decide an appeal, enforce the different-actor rule, and let an overturn actually reopen and re-decide the case rather than just filing a letter.
+- resolve_case — stapel_moderation.services.resolve_case
+  instead of: calling a target module to mutate it, emitting moderation.completed by hand
+  Close a case with a verdict and ACT on the target by emitting the policy's verdict topic — optionally issuing the sanction in the same transaction.
+- screen_case — stapel_moderation.tasks.screen_case
+  The comm-Task handler: read live content, run the screener, record a verdict. Raises rather than returning on failure, which is what makes the retry ladder exist at all.
+- start_screening — stapel_moderation.services.start_screening
+  instead of: calling llm.complete inline in a request
+  Queue the screening comm-Task for a case, or send it straight to a human when automation is off for this type or this deployment.
+- submit_report — stapel_moderation.services.submit_report
+  instead of: Report.objects.create
+  Accept one complaint: validate against the reason registry and the type policy, join or open the case, record the report, count it.
+- sweep_stale_cases — stapel_moderation.tasks.sweep_stale_cases
+  Return expired claims and stalled screenings to the queue. Never renders a verdict — that is the whole difference from the predecessor system's stale sweeper.
+
+## Extension points — what a product replaces, fork-free
+- NotSanctioned [permission_class]
+  The enforcement half the module deliberately does NOT do itself: moderation answers whether a user is sanctioned, and the host hangs this DRF permission on its own write views. Gating publication inside stapel-listings would be a decision about the listings API, which belongs to its owner.
+- PRESENTERS [swap_keys]
+  Every DTO is built by a presenter resolved through STAPEL_SWAP — MODERATION_CASE_PRESENTER, MODERATION_CASE_DETAIL_PRESENTER, MODERATION_REPORT_PRESENTER, MODERATION_VERDICT_PRESENTER, MODERATION_EVENT_PRESENTER, MODERATION_SANCTION_PRESENTER, MODERATION_APPEAL_PRESENTER reshape any envelope without forking a view.
+- REASONS [merge_registry]
+  The complaint taxonomy, and unlike the target types it ships non-empty — spam means the same thing on a listing, a review and an avatar. Each entry carries a severity that orders the queue, whether an explanation is required, which target types it applies to, and the ToU clause quoted in the statement of reasons. One table across every target type is what stops a reason filter from silently dropping a whole class of complaints.
+- RULES [merge_registry]
+  The deterministic pre-LLM stage: a pattern, a decision and a severity. Ships EMPTY on purpose — a shipped keyword list is somebody else's speech policy. A hit is a verdict without paying for a completion, and the policy disclosure enumerates every rule that runs.
+- SCREENER [dotted_path]
+  The whole automatic stage behind one dotted path: (case, content, *, reports) -> ScreeningResult. A host with its own classifier plugs in here rather than forking the module, and the shipped implementation (rules, then schema-constrained llm.complete) is simply the default value.
+- TARGET_TYPES [merge_registry]
+  The flagship seam and the reason the module is target-generic: built-ins are EMPTY, so a host declares what may be moderated at all. A policy is a plain dict — where content is read from (content_function, mandatory), which events open a case, which topic carries the verdict out, which notification type announces a takedown, and per-type behaviour switches. None removes a type; runtime registration also wires that type's intake subscriptions.
+
+## Fits with — fleet dependencies
+- stapel-agent (optional) — the default screener calls llm.complete BY NAME over comm and imports nothing — a deployment without an agent boots fine and sends every case to the human queue (ON_SCREENING_UNAVAILABLE). Only the prompt-injection sanitizer is imported, lazily, with a warning when absent
+- stapel-auth (optional) — moderator rights are staff roles transported as the JWT staff_roles claim; any issuer of that claim satisfies the contract. The module defines no allow-list of its own
+- stapel-cdn (optional) — cdn.describe resolves a target's media references into image URLs for the screener; a deployment with no CDN screens text only
+- stapel-core (required) — comm Actions/Functions/Tasks (the screening retry ladder IS the Task primitive), the Projection primitive for user_sanctions, the transactional outbox, staff-mandate access declarations, the cross-service user blacklist that gives a ban its teeth, notification publishing, the GDPR provider registry, the unified error envelope and the AppSettings config layer
+- stapel-notifications (optional) — the five letters (report received, report reviewed, content blocked, sanction issued, appeal resolved) go out through request_notification; 0.14.0 registers the three moderation.* types and the reason_label/appeal_url variables DSA Art. 17 needs. Without it the verdicts still land, silently
+
+## HTTP operations (18) — call by operationId, never by a typed path
+Paths are relative to `/moderation/api/v1/`.
+### Moderation / appeals
+- POST /appeals/ — moderation_api_v1_appeals_create
+- GET /appeals/ — moderation_api_v1_appeals_list
+- GET /appeals/queue — moderation_api_v1_appeals_queue_list
+- POST /appeals/{appeal_id}/resolve — moderation_api_v1_appeals_resolve_create
+### Moderation / policy
+- GET /policy — moderation_api_v1_policy_retrieve
+### Moderation / queue
+- POST /cases/{case_id}/claim — moderation_api_v1_cases_claim_create
+- GET /cases/{case_id}/events — moderation_api_v1_cases_events_list
+- GET /cases — moderation_api_v1_cases_list
+- POST /cases/{case_id}/release — moderation_api_v1_cases_release_create
+- POST /cases/{case_id}/rescan — moderation_api_v1_cases_rescan_create
+- GET /cases/{case_id} — moderation_api_v1_cases_retrieve
+- POST /cases/{case_id}/verdict — moderation_api_v1_cases_verdict_create
+- GET /stats — moderation_api_v1_stats_retrieve
+### Moderation / reports
+- POST /reports/ — moderation_api_v1_reports_create
+- GET /reports/ — moderation_api_v1_reports_list
+### Moderation / sanctions
+- POST /sanctions — moderation_api_v1_sanctions_create
+- POST /sanctions/{sanction_id}/lift — moderation_api_v1_sanctions_lift_create
+- GET /sanctions — moderation_api_v1_sanctions_list
+
+## Error codes (69) — the StapelError envelope
+Render `t(code, params)`; branch UX on the remediation. Localized text lives in docs/errors.<lang>.md, not here.
+- error.400.bad_request [400] fix_input
+- error.400.captcha_invalid [400] retry
+- error.400.captcha_required [400] retry
+- error.400.expected_list [400] fix_input
+- error.400.field.blank [400] fix_input {field}
+- error.400.field.does_not_exist [400] fix_input {field}
+- error.400.field.invalid [400] fix_input {field}
+- error.400.field.invalid_choice [400] fix_input {field}
+- error.400.field.max_length [400] fix_input {field,max_length}
+- error.400.field.max_value [400] fix_input {field,max_value}
+- error.400.field.min_length [400] fix_input {field,min_length}
+- error.400.field.min_value [400] fix_input {field,min_value}
+- error.400.field.null [400] fix_input {field}
+- error.400.field.required [400] fix_input {field}
+- error.400.field.unique [400] fix_input {field}
+- error.400.invalid_ad_id [400] fix_input
+- error.400.moderation_contact_required [400] fix_input
+- error.400.moderation_description_required [400] fix_input
+- error.400.moderation_invalid_decision [400] fix_input
+- error.400.moderation_invalid_outcome [400] fix_input
+- error.400.moderation_invalid_sanction_kind [400] fix_input
+- error.400.moderation_invalid_transition [400] verify
+- error.400.moderation_own_content [400] verify
+- error.400.moderation_reason_not_applicable [400] fix_input
+- error.400.moderation_unknown_reason [400] fix_input
+- error.400.moderation_unknown_target_type [400] fix_input
+- error.400.validation_error [400] fix_input
+- error.400.verification_failed [400] verify
+- error.400.verification_invalid_factor [400] verify
+- error.401.unauthorized [401] reauthenticate
+- error.402.payment_required [402] retry
+- error.403.forbidden [403] retry
+- error.403.moderation_cannot_report [403] contact_support
+- error.403.moderation_forbidden [403] contact_support
+- error.403.moderation_not_appellant [403] contact_support
+- error.403.moderation_same_actor [403] contact_support
+- error.403.network_blocked [403] contact_support
+- error.403.verification_enrollment_required [403] verify
+- error.403.verification_required [403] verify
+- error.404.ad_not_found [404] retry
+- error.404.moderation_appeal_not_found [404] verify
+- error.404.moderation_case_not_found [404] verify
+- error.404.moderation_sanction_not_found [404] verify
+- error.404.moderation_target_not_found [404] verify
+- error.404.not_found [404] retry
+- error.404.verification_challenge_not_found [404] verify
+- error.405.method_not_allowed [405] retry
+- error.406.not_acceptable [406] retry
+- error.408.request_timeout [408] retry
+- error.409.conflict [409] fix_input
+- error.409.moderation_already_appealed [409] verify
+- error.409.moderation_already_reported [409] verify
+- error.409.moderation_appeal_resolved [409] verify
+- error.409.moderation_case_claimed [409] wait_and_retry
+- error.409.moderation_case_not_resolved [409] verify
+- error.409.moderation_case_resolved [409] verify
+- error.409.moderation_not_claimant [409] verify
+- error.409.moderation_sanction_not_active [409] verify
+- error.410.gone [410] retry
+- error.413.payload_too_large [413] retry
+- error.415.unsupported_media_type [415] retry
+- error.422.unprocessable_entity [422] wait_and_retry
+- error.423.locked [423] wait_and_retry
+- error.423.verification_locked [423] wait_and_retry
+- error.429.rate_limit [429] wait_and_retry {retry_after_minutes}
+- error.429.too_many_requests [429] wait_and_retry
+- error.500.internal [500] contact_support
+- error.503.mandate_unavailable [503] retry
+- error.503.moderation_content_unavailable [503] wait_and_retry

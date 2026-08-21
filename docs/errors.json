@@ -1,0 +1,582 @@
+[
+  {
+    "code": "error.400.bad_request",
+    "status": 400,
+    "params": [],
+    "remediation": "fix_input",
+    "en": "Bad request",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.400.captcha_invalid",
+    "status": 400,
+    "params": [],
+    "remediation": "retry",
+    "en": "Captcha verification failed. Please try again.",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.400.captcha_required",
+    "status": 400,
+    "params": [],
+    "remediation": "retry",
+    "en": "Captcha token is required.",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.400.expected_list",
+    "status": 400,
+    "params": [],
+    "remediation": "fix_input",
+    "en": "Expected a list of items",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.400.field.blank",
+    "status": 400,
+    "params": [
+      "field"
+    ],
+    "remediation": "fix_input",
+    "en": "{field} may not be blank",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.400.field.does_not_exist",
+    "status": 400,
+    "params": [
+      "field"
+    ],
+    "remediation": "fix_input",
+    "en": "{field} does not exist",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.400.field.invalid",
+    "status": 400,
+    "params": [
+      "field"
+    ],
+    "remediation": "fix_input",
+    "en": "{field} is invalid",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.400.field.invalid_choice",
+    "status": 400,
+    "params": [
+      "field"
+    ],
+    "remediation": "fix_input",
+    "en": "{field} is not a valid choice",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.400.field.max_length",
+    "status": 400,
+    "params": [
+      "field",
+      "max_length"
+    ],
+    "remediation": "fix_input",
+    "en": "{field} must be at most {max_length} characters",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.400.field.max_value",
+    "status": 400,
+    "params": [
+      "field",
+      "max_value"
+    ],
+    "remediation": "fix_input",
+    "en": "{field} must be at most {max_value}",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.400.field.min_length",
+    "status": 400,
+    "params": [
+      "field",
+      "min_length"
+    ],
+    "remediation": "fix_input",
+    "en": "{field} must be at least {min_length} characters",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.400.field.min_value",
+    "status": 400,
+    "params": [
+      "field",
+      "min_value"
+    ],
+    "remediation": "fix_input",
+    "en": "{field} must be at least {min_value}",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.400.field.null",
+    "status": 400,
+    "params": [
+      "field"
+    ],
+    "remediation": "fix_input",
+    "en": "{field} may not be null",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.400.field.required",
+    "status": 400,
+    "params": [
+      "field"
+    ],
+    "remediation": "fix_input",
+    "en": "{field} is required",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.400.field.unique",
+    "status": 400,
+    "params": [
+      "field"
+    ],
+    "remediation": "fix_input",
+    "en": "{field} must be unique",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.400.invalid_ad_id",
+    "status": 400,
+    "params": [],
+    "remediation": "fix_input",
+    "en": "Invalid advertisement ID",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.400.moderation_contact_required",
+    "status": 400,
+    "params": [],
+    "remediation": "fix_input",
+    "en": "An anonymous report must carry a contact address",
+    "owner": "stapel_moderation"
+  },
+  {
+    "code": "error.400.moderation_description_required",
+    "status": 400,
+    "params": [],
+    "remediation": "fix_input",
+    "en": "This reason requires an explanation",
+    "owner": "stapel_moderation"
+  },
+  {
+    "code": "error.400.moderation_invalid_decision",
+    "status": 400,
+    "params": [],
+    "remediation": "fix_input",
+    "en": "Unknown moderation decision",
+    "owner": "stapel_moderation"
+  },
+  {
+    "code": "error.400.moderation_invalid_outcome",
+    "status": 400,
+    "params": [],
+    "remediation": "fix_input",
+    "en": "Unknown appeal outcome",
+    "owner": "stapel_moderation"
+  },
+  {
+    "code": "error.400.moderation_invalid_sanction_kind",
+    "status": 400,
+    "params": [],
+    "remediation": "fix_input",
+    "en": "Unknown sanction kind",
+    "owner": "stapel_moderation"
+  },
+  {
+    "code": "error.400.moderation_invalid_transition",
+    "status": 400,
+    "params": [],
+    "remediation": "verify",
+    "en": "The case cannot move to that state",
+    "owner": "stapel_moderation"
+  },
+  {
+    "code": "error.400.moderation_own_content",
+    "status": 400,
+    "params": [],
+    "remediation": "verify",
+    "en": "You cannot report your own content",
+    "owner": "stapel_moderation"
+  },
+  {
+    "code": "error.400.moderation_reason_not_applicable",
+    "status": 400,
+    "params": [],
+    "remediation": "fix_input",
+    "en": "That reason does not apply to this kind of target",
+    "owner": "stapel_moderation"
+  },
+  {
+    "code": "error.400.moderation_unknown_reason",
+    "status": 400,
+    "params": [],
+    "remediation": "fix_input",
+    "en": "Unknown report reason",
+    "owner": "stapel_moderation"
+  },
+  {
+    "code": "error.400.moderation_unknown_target_type",
+    "status": 400,
+    "params": [],
+    "remediation": "fix_input",
+    "en": "This kind of target is not moderated here",
+    "owner": "stapel_moderation"
+  },
+  {
+    "code": "error.400.validation_error",
+    "status": 400,
+    "params": [],
+    "remediation": "fix_input",
+    "en": "Validation error",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.400.verification_failed",
+    "status": 400,
+    "params": [],
+    "remediation": "verify",
+    "en": "Verification failed",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.400.verification_invalid_factor",
+    "status": 400,
+    "params": [],
+    "remediation": "verify",
+    "en": "This verification factor is not available",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.401.unauthorized",
+    "status": 401,
+    "params": [],
+    "remediation": "reauthenticate",
+    "en": "Authentication required",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.402.payment_required",
+    "status": 402,
+    "params": [],
+    "remediation": "retry",
+    "en": "Payment required",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.403.forbidden",
+    "status": 403,
+    "params": [],
+    "remediation": "retry",
+    "en": "You do not have permission to perform this action",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.403.moderation_cannot_report",
+    "status": 403,
+    "params": [],
+    "remediation": "contact_support",
+    "en": "You may not report this target",
+    "owner": "stapel_moderation"
+  },
+  {
+    "code": "error.403.moderation_forbidden",
+    "status": 403,
+    "params": [],
+    "remediation": "contact_support",
+    "en": "You do not have the clearance for this action",
+    "owner": "stapel_moderation"
+  },
+  {
+    "code": "error.403.moderation_not_appellant",
+    "status": 403,
+    "params": [],
+    "remediation": "contact_support",
+    "en": "You may not appeal this decision",
+    "owner": "stapel_moderation"
+  },
+  {
+    "code": "error.403.moderation_same_actor",
+    "status": 403,
+    "params": [],
+    "remediation": "contact_support",
+    "en": "An appeal must be decided by a different moderator",
+    "owner": "stapel_moderation"
+  },
+  {
+    "code": "error.403.network_blocked",
+    "status": 403,
+    "params": [],
+    "remediation": "contact_support",
+    "en": "Requests from this network are not allowed",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.403.verification_enrollment_required",
+    "status": 403,
+    "params": [],
+    "remediation": "verify",
+    "en": "Verification factor enrollment required",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.403.verification_required",
+    "status": 403,
+    "params": [],
+    "remediation": "verify",
+    "en": "Additional verification required",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.404.ad_not_found",
+    "status": 404,
+    "params": [],
+    "remediation": "retry",
+    "en": "Listing not found",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.404.moderation_appeal_not_found",
+    "status": 404,
+    "params": [],
+    "remediation": "verify",
+    "en": "Appeal not found",
+    "owner": "stapel_moderation"
+  },
+  {
+    "code": "error.404.moderation_case_not_found",
+    "status": 404,
+    "params": [],
+    "remediation": "verify",
+    "en": "Case not found",
+    "owner": "stapel_moderation"
+  },
+  {
+    "code": "error.404.moderation_sanction_not_found",
+    "status": 404,
+    "params": [],
+    "remediation": "verify",
+    "en": "Sanction not found",
+    "owner": "stapel_moderation"
+  },
+  {
+    "code": "error.404.moderation_target_not_found",
+    "status": 404,
+    "params": [],
+    "remediation": "verify",
+    "en": "The reported target does not exist",
+    "owner": "stapel_moderation"
+  },
+  {
+    "code": "error.404.not_found",
+    "status": 404,
+    "params": [],
+    "remediation": "retry",
+    "en": "Requested resource not found",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.404.verification_challenge_not_found",
+    "status": 404,
+    "params": [],
+    "remediation": "verify",
+    "en": "Verification challenge not found or expired",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.405.method_not_allowed",
+    "status": 405,
+    "params": [],
+    "remediation": "retry",
+    "en": "Method not allowed",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.406.not_acceptable",
+    "status": 406,
+    "params": [],
+    "remediation": "retry",
+    "en": "Not acceptable",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.408.request_timeout",
+    "status": 408,
+    "params": [],
+    "remediation": "retry",
+    "en": "Request timeout",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.409.conflict",
+    "status": 409,
+    "params": [],
+    "remediation": "fix_input",
+    "en": "Resource already exists",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.409.moderation_already_appealed",
+    "status": 409,
+    "params": [],
+    "remediation": "verify",
+    "en": "You have already appealed this case",
+    "owner": "stapel_moderation"
+  },
+  {
+    "code": "error.409.moderation_already_reported",
+    "status": 409,
+    "params": [],
+    "remediation": "verify",
+    "en": "You have already reported this target",
+    "owner": "stapel_moderation"
+  },
+  {
+    "code": "error.409.moderation_appeal_resolved",
+    "status": 409,
+    "params": [],
+    "remediation": "verify",
+    "en": "This appeal has already been decided",
+    "owner": "stapel_moderation"
+  },
+  {
+    "code": "error.409.moderation_case_claimed",
+    "status": 409,
+    "params": [],
+    "remediation": "wait_and_retry",
+    "en": "Another moderator is holding this case",
+    "owner": "stapel_moderation"
+  },
+  {
+    "code": "error.409.moderation_case_not_resolved",
+    "status": 409,
+    "params": [],
+    "remediation": "verify",
+    "en": "Only a resolved case can be appealed",
+    "owner": "stapel_moderation"
+  },
+  {
+    "code": "error.409.moderation_case_resolved",
+    "status": 409,
+    "params": [],
+    "remediation": "verify",
+    "en": "This case has already been resolved",
+    "owner": "stapel_moderation"
+  },
+  {
+    "code": "error.409.moderation_not_claimant",
+    "status": 409,
+    "params": [],
+    "remediation": "verify",
+    "en": "This case is claimed by another moderator",
+    "owner": "stapel_moderation"
+  },
+  {
+    "code": "error.409.moderation_sanction_not_active",
+    "status": 409,
+    "params": [],
+    "remediation": "verify",
+    "en": "This sanction is no longer active",
+    "owner": "stapel_moderation"
+  },
+  {
+    "code": "error.410.gone",
+    "status": 410,
+    "params": [],
+    "remediation": "retry",
+    "en": "Resource has been permanently removed",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.413.payload_too_large",
+    "status": 413,
+    "params": [],
+    "remediation": "retry",
+    "en": "Request body is too large",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.415.unsupported_media_type",
+    "status": 415,
+    "params": [],
+    "remediation": "retry",
+    "en": "Unsupported media type",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.422.unprocessable_entity",
+    "status": 422,
+    "params": [],
+    "remediation": "wait_and_retry",
+    "en": "Unprocessable entity",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.423.locked",
+    "status": 423,
+    "params": [],
+    "remediation": "wait_and_retry",
+    "en": "Resource is locked",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.423.verification_locked",
+    "status": 423,
+    "params": [],
+    "remediation": "wait_and_retry",
+    "en": "Too many failed attempts — verification locked",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.429.rate_limit",
+    "status": 429,
+    "params": [
+      "retry_after_minutes"
+    ],
+    "remediation": "wait_and_retry",
+    "en": "Too many attempts. Try again in {retry_after_minutes} minutes.",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.429.too_many_requests",
+    "status": 429,
+    "params": [],
+    "remediation": "wait_and_retry",
+    "en": "Too many requests. Please try again later.",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.500.internal",
+    "status": 500,
+    "params": [],
+    "remediation": "contact_support",
+    "en": "Something went wrong",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.503.mandate_unavailable",
+    "status": 503,
+    "params": [],
+    "remediation": "retry",
+    "en": "Cannot verify workspace mandate right now",
+    "owner": "stapel_core"
+  },
+  {
+    "code": "error.503.moderation_content_unavailable",
+    "status": 503,
+    "params": [],
+    "remediation": "wait_and_retry",
+    "en": "The target's content cannot be read right now",
+    "owner": "stapel_moderation"
+  }
+]

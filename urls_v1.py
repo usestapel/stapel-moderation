@@ -53,7 +53,7 @@ console_patterns = [
         SanctionLiftView.as_view(),
         name="moderation-sanction-lift",
     ),
-    path("appeals", AppealQueueView.as_view(), name="moderation-appeal-queue"),
+    path("appeals/queue", AppealQueueView.as_view(), name="moderation-appeal-queue"),
     path(
         "appeals/<uuid:appeal_id>/resolve",
         AppealResolveView.as_view(),
