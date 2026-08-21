@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "moderation.sanction.lifted",
+  "description": "A sanction was revoked before its clock ran out (moderator discretion, or an appeal that overturned it).",
+  "type": "object",
+  "required": [
+    "sanction_id",
+    "subject_user_id",
+    "seq"
+  ],
+  "properties": {
+    "sanction_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "subject_user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "lifted_at": {
+      "type": "string"
+    },
+    "seq": {
+      "type": "integer",
+      "description": "Unix milliseconds; see moderation.sanction.issued."
+    }
+  },
+  "additionalProperties": true
+}

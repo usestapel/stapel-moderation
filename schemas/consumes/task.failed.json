@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "task.failed",
+  "description": "A comm Task exhausted its attempts and was parked. Consumed with a filter on kind == \"moderation.screen\": that is where ON_SCREENING_FAILURE is applied. correlation_id carries the case id, which is why start() is called with it.",
+  "type": "object",
+  "required": [
+    "task_id",
+    "kind"
+  ],
+  "properties": {
+    "task_id": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string"
+    },
+    "error": {
+      "type": "string"
+    },
+    "correlation_id": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "moderation.appeal.resolved",
+  "description": "An appeal was decided. An overturned appeal has already reopened and re-resolved its case, so a consumer sees the corrected verdict on moderation.completed as well.",
+  "type": "object",
+  "required": [
+    "appeal_id",
+    "case_id",
+    "outcome"
+  ],
+  "properties": {
+    "appeal_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "case_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "outcome": {
+      "type": "string",
+      "enum": [
+        "upheld",
+        "overturned",
+        "withdrawn"
+      ]
+    }
+  },
+  "additionalProperties": true
+}

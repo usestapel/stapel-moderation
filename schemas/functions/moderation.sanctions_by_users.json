@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "moderation.sanctions_by_users",
+  "description": "Batch sanction state for many users — the live_query half of the moderation.user_sanctions Projection (local mode reads through this instead of keeping a table). Response: {user_id: {\"allowed\": boolean, \"sanctions\": [...]}}; users with no active sanction are ABSENT, per the live_query contract in stapel_core.comm.projections.read().",
+  "type": "object",
+  "required": [
+    "keys"
+  ],
+  "properties": {
+    "keys": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false
+}

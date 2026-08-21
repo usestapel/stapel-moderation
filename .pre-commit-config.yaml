@@ -1,0 +1,11 @@
+# Install: pip install pre-commit && pre-commit install
+# Run on demand: pre-commit run --all-files
+repos:
+  - repo: local
+    hooks:
+      - id: stapel-verify
+        name: stapel-verify (R/SWAP/CFG/URL/ADO/MIG/DOC codes)
+        entry: stapel-verify .
+        language: system
+        pass_filenames: false
+        always_run: true

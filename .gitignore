@@ -1,0 +1,21 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+.env
+*.sqlite3
+.coverage
+coverage.xml
+htmlcov/
+junit.xml
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# editor / OS cruft
+.DS_Store
+
+# build/test stderr scratch
+*.err

@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "moderation.sanction.issued",
+  "description": "An account-level sanction was issued. Keyed on subject_user_id so everything about one user stays ordered. Carries no statement of reasons — only the machine reason code.",
+  "type": "object",
+  "required": [
+    "sanction_id",
+    "case_id",
+    "subject_user_id",
+    "kind",
+    "scope",
+    "starts_at",
+    "seq"
+  ],
+  "properties": {
+    "sanction_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "case_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "subject_user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "warning",
+        "content_removed",
+        "posting_restricted",
+        "suspended",
+        "banned"
+      ]
+    },
+    "scope": {
+      "type": "string",
+      "description": "\"*\", a target_type, or a scope_key."
+    },
+    "starts_at": {
+      "type": "string"
+    },
+    "expires_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "null = indefinite."
+    },
+    "reason_code": {
+      "type": "string"
+    },
+    "seq": {
+      "type": "integer",
+      "description": "Ordering token in unix MILLISECONDS — the same unit as an Event timestamp and as the sanctions_export snapshot's seq, which is what lets a live fact arriving mid-rebuild supersede a snapshot row instead of racing it."
+    }
+  },
+  "additionalProperties": true
+}

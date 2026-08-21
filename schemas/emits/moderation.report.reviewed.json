@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "moderation.report.reviewed",
+  "description": "One complaint reached a decision, because the case it belongs to was resolved.",
+  "type": "object",
+  "required": [
+    "report_id",
+    "case_id",
+    "decision"
+  ],
+  "properties": {
+    "report_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "case_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "decision": {
+      "type": "string",
+      "enum": [
+        "approved",
+        "rejected",
+        "needs_review",
+        "dismissed"
+      ]
+    }
+  },
+  "additionalProperties": true
+}

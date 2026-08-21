@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "moderation.applied",
+  "description": "OPTIONAL acknowledgement from a target module that it applied a verdict. Neither stapel-listings 0.4.0 nor stapel-reviews 0.2.0 emits one; the mechanism exists so a deployment that needs delivery assurance can turn APPLY_ACK_TIMEOUT_SECONDS on once a producer exists.",
+  "type": "object",
+  "required": [
+    "case_id"
+  ],
+  "properties": {
+    "case_id": {
+      "type": "string"
+    },
+    "target_type": {
+      "type": "string"
+    },
+    "target_key": {
+      "type": "string"
+    },
+    "applied": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": true
+}

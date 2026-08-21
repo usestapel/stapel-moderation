@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "moderation.check_sanctions",
+  "description": "Is this user under an active sanction? The READ half of enforcement (spec §9.4): the module answers, the host's own write view refuses — moderation does not intercept anybody's traffic. Response: {\"allowed\": boolean, \"sanctions\": [{\"kind\", \"scope\", \"expires_at\", \"reason_code\"}]}.",
+  "type": "object",
+  "required": [
+    "user_id"
+  ],
+  "properties": {
+    "user_id": {
+      "type": "string"
+    },
+    "scope": {
+      "type": "string",
+      "description": "Narrow the question to one scope: a sanction scoped \"*\" always matches, a scoped one matches only its own scope. Absent = ask about \"*\" only."
+    }
+  },
+  "additionalProperties": false
+}

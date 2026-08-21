@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "moderation.sanction.expired",
+  "description": "A sanction reached its expires_at and stopped being in force.",
+  "type": "object",
+  "required": [
+    "sanction_id",
+    "subject_user_id",
+    "seq"
+  ],
+  "properties": {
+    "sanction_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "subject_user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "expired_at": {
+      "type": "string"
+    },
+    "seq": {
+      "type": "integer",
+      "description": "Unix milliseconds; see moderation.sanction.issued."
+    }
+  },
+  "additionalProperties": true
+}

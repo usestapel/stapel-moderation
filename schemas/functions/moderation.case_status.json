@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "moderation.case_status",
+  "description": "The moderation standing of one target — the mirror of listings.status, for a host that wants to render \"under review\" without holding a projection. Response: {\"case_id\": string|null, \"state\": string, \"decision\": string, \"reason_code\": string, \"decided_at\": string}. A target that was never moderated answers state \"none\".",
+  "type": "object",
+  "required": [
+    "target_type",
+    "target_key"
+  ],
+  "properties": {
+    "target_type": {
+      "type": "string"
+    },
+    "target_key": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

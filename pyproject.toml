@@ -1,0 +1,67 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stapel-moderation"
+version = "0.1.0"
+description = "Target-generic moderation queue: reports, verdicts, sanctions and appeals for the Stapel framework"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+keywords = ["django", "stapel", "moderation"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: Django",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Typing :: Typed",
+]
+dependencies = [
+    "stapel-core>=0.29.0,<1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/usestapel/stapel-moderation"
+Repository = "https://github.com/usestapel/stapel-moderation"
+Documentation = "https://github.com/usestapel/stapel-moderation#readme"
+Changelog = "https://github.com/usestapel/stapel-moderation/blob/main/CHANGELOG.md"
+Issues = "https://github.com/usestapel/stapel-moderation/issues"
+
+[project.optional-dependencies]
+all = []
+
+[tool.setuptools]
+package-dir = {"stapel_moderation" = "."}
+packages = ["stapel_moderation", "stapel_moderation.migrations"]
+
+[tool.setuptools.package-data]
+# The contract documents ship IN THE WHEEL: that is what makes
+# `stapel-catalog --from-installed` possible, i.e. what turns catalog
+# freshness from somebody's discipline into a property of the lockfile.
+# A module that keeps them repo-only publishes code an agent cannot read.
+stapel_moderation = ["py.typed", "docs/capabilities.json", "docs/flows.json", "docs/errors.json", "CONFIG.MD", "migrations/*.py", "schemas/**/*.json"]
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint]
+# Single source for the git hooks and CI (they pass the same flags on the CLI).
+select = ["E", "F", "W"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+django_find_project = false
+addopts = "--tb=short -q --import-mode=importlib"
+
+[tool.coverage.run]
+omit = [
+    "*/tests/*",
+    "*/conftest.py",
+    "*/migrations/*",
+]

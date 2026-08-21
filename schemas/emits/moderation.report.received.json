@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "moderation.report.received",
+  "description": "One user's complaint was accepted. The reporter's identity and the complaint text are deliberately absent — a consumer that needs them reads the case over REST under a staff mandate.",
+  "type": "object",
+  "required": [
+    "report_id",
+    "case_id",
+    "target_type",
+    "target_key",
+    "reason_code"
+  ],
+  "properties": {
+    "report_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "case_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "target_type": {
+      "type": "string"
+    },
+    "target_key": {
+      "type": "string"
+    },
+    "reason_code": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}

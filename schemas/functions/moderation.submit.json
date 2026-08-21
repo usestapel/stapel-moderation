@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "moderation.submit",
+  "description": "Open (or find) a moderation case for one target — the explicit submission path for a module that has no event worth publishing. Idempotent by state: an already-open case for the same target is returned rather than duplicated. Response: {\"case_id\": string, \"state\": string, \"created\": boolean}.",
+  "type": "object",
+  "required": [
+    "target_type",
+    "target_key"
+  ],
+  "properties": {
+    "target_type": {
+      "type": "string",
+      "description": "Registry key; an unregistered type raises."
+    },
+    "target_key": {
+      "type": "string",
+      "description": "Opaque host key of the target."
+    },
+    "scope_key": {
+      "type": "string",
+      "description": "Opaque tenant/area partition."
+    },
+    "origin": {
+      "type": "string",
+      "enum": [
+        "submission",
+        "report",
+        "manual",
+        "rescan",
+        "appeal"
+      ],
+      "description": "Defaults to \"submission\"."
+    }
+  },
+  "additionalProperties": false
+}

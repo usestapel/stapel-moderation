@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "user.deleted",
+  "description": "Account deletion executed. Consumed by the GDPR provider: the complainant's identity is nulled out of their reports; cases, verdicts and the audit trail survive, because a moderation record about content is not the complainant's personal data to erase.",
+  "type": "object",
+  "required": [
+    "user_id"
+  ],
+  "properties": {
+    "user_id": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}

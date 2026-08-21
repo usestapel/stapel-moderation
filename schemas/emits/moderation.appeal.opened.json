@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "moderation.appeal.opened",
+  "description": "The subject of a decision appealed it (DSA Art. 20). The appeal body is not on the bus.",
+  "type": "object",
+  "required": [
+    "appeal_id",
+    "case_id",
+    "appellant_id"
+  ],
+  "properties": {
+    "appeal_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "case_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "appellant_id": {
+      "type": "string",
+      "format": "uuid"
+    }
+  },
+  "additionalProperties": true
+}

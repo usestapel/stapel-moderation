@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "staff.role.revoked",
+  "description": "A staff role was taken away. Consumed to release any case leases the departing moderator was holding — otherwise a claimed case waits out its whole lease for somebody who can no longer open it.",
+  "type": "object",
+  "required": [
+    "user_id"
+  ],
+  "properties": {
+    "user_id": {
+      "type": "string"
+    },
+    "role": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}

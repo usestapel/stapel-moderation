@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "moderation.policy_disclosure",
+  "description": "DSA Art. 15(1)(e) disclosure of the moderation mechanism, GENERATED FROM THE REGISTRIES rather than kept as a prose copy that drifts: the reason taxonomy, the deterministic rule set, and the facts about automation (is an LLM screener enabled, what happens when it is unavailable, is a human always in the loop). Response: {\"reasons\": [...], \"rules\": [...], \"automated_means\": {...}, \"human_review\": {...}}.",
+  "type": "object",
+  "required": [],
+  "properties": {
+    "lang": {
+      "type": "string",
+      "description": "BCP-47 tag; the disclosure returns translation KEYS regardless, so this only annotates the answer."
+    },
+    "target_type": {
+      "type": "string",
+      "description": "Narrow the reasons/rules to those applicable to one target type."
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "moderation.case.queued",
+  "description": "A case now needs a human: the automation abstained, the screener failed under the hold policy, or the target policy demands a person.",
+  "type": "object",
+  "required": [
+    "case_id",
+    "target_type",
+    "target_key"
+  ],
+  "properties": {
+    "case_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "target_type": {
+      "type": "string"
+    },
+    "target_key": {
+      "type": "string"
+    },
+    "reason_code": {
+      "type": "string",
+      "description": "Why it was queued (a reason-registry key, possibly a system reason such as screening_unavailable)."
+    }
+  },
+  "additionalProperties": true
+}

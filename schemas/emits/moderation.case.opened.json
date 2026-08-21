@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "moderation.case.opened",
+  "description": "A moderation case was opened for one target. Identifiers only: the case's content is read through the target policy's content_function, never from this payload.",
+  "type": "object",
+  "required": [
+    "case_id",
+    "target_type",
+    "target_key",
+    "origin",
+    "severity"
+  ],
+  "properties": {
+    "case_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "target_type": {
+      "type": "string",
+      "description": "Registry key of the moderated target kind."
+    },
+    "target_key": {
+      "type": "string",
+      "description": "Opaque host-owned key of the target within target_type. Never parsed by this module."
+    },
+    "scope_key": {
+      "type": "string",
+      "description": "Opaque tenant/area partition, \"\" when the deployment has none."
+    },
+    "origin": {
+      "type": "string",
+      "enum": [
+        "submission",
+        "report",
+        "manual",
+        "rescan",
+        "appeal"
+      ]
+    },
+    "severity": {
+      "type": "integer",
+      "description": "Highest reason severity seen so far; the queue's sort key."
+    }
+  },
+  "additionalProperties": true
+}

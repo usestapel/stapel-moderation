@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "moderation.sanctions_export",
+  "description": "Cursor-paged snapshot of every sanctioned user — the source_of_truth half of the moderation.user_sanctions Projection, read by rebuild() and drift_check(). Response: {\"rows\": [{\"subject_user_id\", \"allowed\", \"sanctions\", \"seq\"}], \"cursor\": string|null, \"total\": integer|null}. The shape is NOT {items, cursor}: stapel_core.comm.projections._iter_snapshot reads resp[\"rows\"], and an items-shaped answer would rebuild the table to empty without a single error (moderation spec §22.1). `seq` is unix MILLISECONDS, the same clock as an Event timestamp.",
+  "type": "object",
+  "required": [],
+  "properties": {
+    "cursor": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Continuation token from the previous page. Null/absent starts at the beginning."
+    },
+    "limit": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1,
+      "description": "Rows per page; absent means EXPORT_PAGE_SIZE, values above 2000 are clamped."
+    }
+  },
+  "additionalProperties": false
+}
