@@ -24,18 +24,38 @@ jobs:
         run: pip install git+https://github.com/usestapel/stapel-core.git
 
       - name: Install
-        run: pip install ".[all]" || pip install .
+        # EDITABLE on purpose. The test suite's ROOT_URLCONF is
+        # `stapel_moderation.tests.urls`, and tests/ is deliberately not a
+        # shipped package — so a plain `pip install .` makes every request-
+        # making test fail with "No module named stapel_moderation.tests"
+        # while the local suite stays green. The scaffold's non-editable line
+        # did exactly that on this repo's first CI run.
+        run: pip install -e ".[all]" || pip install -e .
 
       - name: Lint
         run: |
           pip install ruff --quiet
           ruff check . --select E,F,W --ignore E501
 
+      - name: migration-lint (expand/contract gate, release-management.md §3)
+        run: |
+          pip install "stapel-tools>=0.9.1,<1" --quiet
+          stapel-migration-lint . --strict
+
+      - name: emit-check (outbox discipline, incl. EMIT005)
+        # An emit outside its mutating transaction is a row that exists
+        # without the fact it announced; a declared emit helper with no call
+        # site is a fact nobody publishes.
+        run: python -m stapel_core.lint.emit_check .
+
       - name: Import check
         run: python -c "import stapel_moderation; print('import OK')"
 
       - name: Install test dependencies
-        run: pip install pytest pytest-django pytest-cov
+        # stapel-tools: tests/test_contract.py drives the contract emitters
+        # (capabilities, llms_txt, readme) and fails on ModuleNotFound
+        # without it.
+        run: pip install pytest pytest-django pytest-cov "stapel-tools>=0.9.1,<1"
 
       - name: Tests with coverage
         run: |

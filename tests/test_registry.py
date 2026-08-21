@@ -286,6 +286,14 @@ def test_w006_a_content_function_nobody_provides(db, settings):
 
 
 def test_the_beat_schedule_builder_names_every_job(db):
+    """Celery is OPTIONAL, so this asserts on the entries only where it exists.
+
+    The jobs themselves are plain callables a cron or a systemd timer can run;
+    only the ready-made beat dict needs ``celery.schedules.crontab``. The
+    check that matters without celery — "this host schedules none of them" —
+    compares task NAMES and is covered above.
+    """
+    pytest.importorskip("celery")
     from stapel_moderation.tasks import BEAT_TASK_NAMES, get_moderation_beat_schedule
 
     schedule = get_moderation_beat_schedule()
