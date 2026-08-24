@@ -81,10 +81,15 @@ So a type declares `"evidence": True` and drops `content_function`. Then:
 **Stated limitation.** `author_id` in evidence is an *accusation*, not a
 fact: nobody in the fleet can confirm who wrote a message no service serves.
 It still becomes `Case.subject_user_id`, because otherwise the sanction
-ladder has no subject at all — but every render of it says `verified: false`,
-and a host that can narrow it (a marketplace whose direct threads have
-exactly two parties, so "the other one" is server-derivable) should derive it
-rather than trust the client. stapel-classified does exactly that.
+ladder has no subject at all — but every render of it says `verified: false`.
+
+What a host CAN narrow is who may file at all. stapel-classified names chat
+messages `<conversation_id>:<message_id>` precisely so its `can_report`
+callback can answer, off its own conversation↔parties table, that the
+reporter was in the thread — and its frontend contract requires the
+attested `author_id` to be the server-derived counterparty from that same
+table rather than whatever a client's message cache holds. Neither makes the
+attestation a fact; both make it accountable.
 
 ### Reasons — `STAPEL_MODERATION["REASONS"]` (MERGE registry)
 
