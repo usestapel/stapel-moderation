@@ -49,7 +49,7 @@ a plain dict, never an ABC.
 | `verdict_event` | `"moderation.completed"` | Topic the verdict travels on. Explicit `None` = "this target consumes no verdict", a statement rather than an omission. |
 | `notification_types` | `{}` | `"content_blocked"` → the notification type announcing a takedown. |
 | `can_report` | `None` | comm Function; `None` = any authenticated user (fail-OPEN). |
-| `can_view_content` | `None` | comm Function; `None` = a cleared moderator sees it (fail-OPEN, argued in `registry.py`). |
+| `can_view_content` | `None` | comm Function; `None` = a cleared moderator sees it (fail-OPEN, argued in `registry.py`). Since 0.3.0 it is called with the **asking moderator's** `actor_id`, so a per-person gate can actually answer. |
 | `reasons` | `["*"]` | Which reason codes apply to this type. |
 | `screen` / `media` | `True` / `True` | Run the automatic stage; include images in it. |
 | `severity_floor` | `0` | Minimum queue severity for this type. |
@@ -114,6 +114,13 @@ here rather than forking. Default:
 `MODERATION_REPORT_PRESENTER`, `MODERATION_VERDICT_PRESENTER`,
 `MODERATION_EVENT_PRESENTER`, `MODERATION_SANCTION_PRESENTER`,
 `MODERATION_APPEAL_PRESENTER`.
+
+The case-detail presenter owns the card's `content` field (0.3.0). The read
+itself stays in the view — it needs the actor and it can fail — but its
+result is handed to `present_case_detail(case, content=...)` and declared on
+the DTO, so `docs/schema.json` carries `ContentDTO` and a generated client
+can type the one field the console is built around. A replacement presenter
+must keep the field; dropping it blanks the card.
 
 ### Serializer seams (`views.py`)
 

@@ -16,7 +16,15 @@ from typing import Any, Dict, List, Optional
 from stapel_core.django.api.presenters import Presenter, PresenterField
 from stapel_core.django.swappable import declare_swap, get_presenter
 
+from .dto import ContentDTO
 from .models import Appeal, Case, CaseEvent, Report, Sanction, Verdict
+
+#: Where :func:`present_case_detail` parks the resolved content envelope so
+#: the presenter can read it off the DAO. The read hits another module and
+#: can fail, so it is resolved by the caller (which knows the actor) rather
+#: than inside the presenter — but its RESULT is a declared field of the
+#: card, not something grafted onto the response afterwards.
+CONTENT_ATTR = "_stapel_moderation_content"
 
 CASE_PRESENTER_KEY = "MODERATION_CASE_PRESENTER"
 DEFAULT_CASE_PRESENTER = "stapel_moderation.presenters.CasePresenter"
@@ -44,6 +52,18 @@ declare_swap(APPEAL_PRESENTER_KEY, DEFAULT_APPEAL_PRESENTER)
 
 def _iso(moment) -> Optional[str]:
     return moment.isoformat() if moment else None
+
+
+def _content_of(dao) -> ContentDTO:
+    """The content envelope parked on the DAO, or the "nobody read it" branch.
+
+    A caller that presents a case card without resolving the content gets the
+    unavailable branch with a named reason — never a silently absent key.
+    """
+    content = getattr(dao, CONTENT_ATTR, None)
+    if content is None:
+        return ContentDTO(available=False, error="not_loaded")
+    return content
 
 
 class CasePresenter(Presenter):
@@ -299,11 +319,13 @@ class AppealPresenter(Presenter):
 
 
 class CaseDetailPresenter(Presenter):
-    """Presents one case card: the case, its complaints and its verdicts.
+    """Presents one case card: the case, its complaints, verdicts and content.
 
-    The target's live CONTENT is not here — it is fetched by the view through
-    ``content_function`` and attached as its own envelope, because a read that
-    can fail must be able to say so without failing the whole card.
+    ``content`` is the target's live text as read through the type's
+    ``content_function``. It is resolved by the caller (which knows who is
+    asking) and handed to :func:`present_case_detail`, because a read that can
+    fail must be able to say so without failing the whole card — but it is a
+    declared field of this DTO, so the schema carries it like any other.
 
     Example:
         {
@@ -324,7 +346,18 @@ class CaseDetailPresenter(Presenter):
             "reports": [],
             "verdicts": [],
             "sanctions": [],
-            "appeals": []
+            "appeals": [],
+            "content": {
+                "available": true,
+                "error": "",
+                "text": "Genuine Rolex, cash only, meet at the station.",
+                "title": "Rolex Submariner",
+                "language": "en",
+                "media": ["cdn://photo/1"],
+                "author_id": "5cc26b64-0717-4562-b3fc-2c963f66a001",
+                "url": "https://example.test/listings/412",
+                "extra": {}
+            }
         }
     """
 
@@ -363,6 +396,16 @@ class CaseDetailPresenter(Presenter):
         "appeals": PresenterField(
             type=AppealPresenter, many=True, source=lambda dao: dao.appeals.all()
         ),
+        "content": PresenterField(
+            type=ContentDTO,
+            source=_content_of,
+            help_text=(
+                "The target's live content, read when the card was opened. "
+                "A failed read is a rendered state: available=false carries "
+                "the reason (no_content_function, forbidden, target_not_found, "
+                "not_loaded, or the unavailability message)."
+            ),
+        ),
     }
 
 
@@ -373,7 +416,10 @@ def present_case(case):
     return get_presenter(CASE_PRESENTER_KEY, default=DEFAULT_CASE_PRESENTER).present(case)
 
 
-def present_case_detail(case):
+def present_case_detail(case, *, content=None):
+    """Present one case card. ``content`` is the already-resolved envelope."""
+    if content is not None:
+        setattr(case, CONTENT_ATTR, content)
     return get_presenter(
         CASE_DETAIL_PRESENTER_KEY, default=DEFAULT_CASE_DETAIL_PRESENTER
     ).present(case)
@@ -477,6 +523,7 @@ def present_content(content, *, available: bool = True, error: str = ""):
 
 __all__: List[str] = [
     "APPEAL_PRESENTER_KEY",
+    "CONTENT_ATTR",
     "CASE_DETAIL_PRESENTER_KEY",
     "CASE_PRESENTER_KEY",
     "EVENT_PRESENTER_KEY",

@@ -289,3 +289,40 @@ def test_llms_txt_budget_matches_the_makefile():
     makefile = (REPO / "Makefile").read_text()
     assert f"--budget {LLMS_TXT_BUDGET}" in makefile
     assert "--budget" not in makefile.replace(f"--budget {LLMS_TXT_BUDGET}", "")
+
+
+def test_the_case_card_declares_its_content_in_the_schema():
+    """A key a generated client cannot see is a key it cannot type.
+
+    ``content`` used to be attached to the response dict after serialization,
+    so every consumer generating types from this schema had to hand-write the
+    one field the whole moderator console is built around.
+    """
+    schema = json.loads((DOCS / "schema.json").read_text())
+    comps = schema["components"]["schemas"]
+    card = comps["CaseDetailPresenterDTO"]
+    assert "content" in card["properties"], (
+        "CaseDetailPresenterDTO has no `content` property — the case card's "
+        "content is grafted on after serialization again"
+    )
+    assert "content" in card["required"]
+    assert "ContentDTO" in comps
+    assert set(comps["ContentDTO"]["properties"]) >= {
+        "available",
+        "error",
+        "text",
+        "title",
+        "media",
+        "author_id",
+    }
+
+
+def test_every_registered_error_key_carries_a_remediation():
+    """A refusal a client cannot act on is a dead end in the UI."""
+    from stapel_moderation.errors import (
+        STAPEL_MODERATION_ERRORS,
+        STAPEL_MODERATION_REMEDIATION,
+    )
+
+    missing = set(STAPEL_MODERATION_ERRORS) - set(STAPEL_MODERATION_REMEDIATION)
+    assert not missing, f"error keys with no remediation verb: {sorted(missing)}"

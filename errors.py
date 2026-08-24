@@ -82,6 +82,7 @@ STAPEL_MODERATION_REMEDIATION = {
     ERR_400_UNKNOWN_REASON: "fix_input",
     ERR_400_REASON_NOT_APPLICABLE: "fix_input",
     ERR_400_DESCRIPTION_REQUIRED: "fix_input",
+    ERR_400_EVIDENCE_INVALID: "fix_input",
     ERR_400_OWN_CONTENT: "verify",
     ERR_400_CONTACT_REQUIRED: "fix_input",
     ERR_403_CANNOT_REPORT: "contact_support",

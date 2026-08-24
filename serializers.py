@@ -15,7 +15,6 @@ from stapel_core.django.swappable import get_presenter
 
 from .dto import (
     CasePageDTO,
-    ContentDTO,
     PolicyDisclosureDTO,
     ReportResultDTO,
     RescanResultDTO,
@@ -67,11 +66,6 @@ AppealSerializer = get_presenter(
 class ReportResultResponseSerializer(StapelDataclassSerializer):
     class Meta:
         dataclass = ReportResultDTO
-
-
-class ContentResponseSerializer(StapelDataclassSerializer):
-    class Meta:
-        dataclass = ContentDTO
 
 
 class CasePageResponseSerializer(StapelDataclassSerializer):
@@ -227,7 +221,6 @@ __all__ = [
     "CasePageResponseSerializer",
     "CaseQuerySerializer",
     "CaseSerializer",
-    "ContentResponseSerializer",
     "KeysetQuerySerializer",
     "PolicyDisclosureResponseSerializer",
     "PolicyQuerySerializer",

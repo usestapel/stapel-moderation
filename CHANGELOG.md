@@ -4,6 +4,55 @@ All notable changes to stapel-moderation are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Pre-1.0 semver: **minor = breaking**, patch = compatible.
 
+## [0.3.0] — 2026-08-24
+
+### Fixed
+
+**The case card's `content` is a field of the contract, not a graft.** The
+view built the card, serialized it, then wrote `body["content"] = …` on the
+resulting dict — so `docs/schema.json` never carried it and every client
+generating types from the contract had to hand-write the one field the whole
+moderator console is built around. `content` is now a declared field of
+`CaseDetailPresenter`, the schema carries a real `ContentDTO` component, and
+the read still happens in the view (it needs the actor, and it can fail):
+`present_case_detail(case, content=…)`. A card presented without a resolved
+read renders `available=false, error="not_loaded"` — never a missing key.
+
+**`can_view_content` was asked on behalf of nobody.** The view passed
+`actor_id=None`, so a target type gating the read per moderator answered
+about an anonymous caller. It now receives `request.user.pk`.
+
+**A decided appeal answered `400 invalid_outcome`.** Re-resolving an appeal
+that was already upheld or overturned is a STATE conflict, and answering with
+a field error sent the console back to fix an `outcome` that was never wrong.
+It is now `409 error.409.moderation_appeal_resolved` — the key was registered
+in 0.1.0 and had never been reachable. An unknown outcome word is still 400.
+
+**Two more registered refusals were unreachable.**
+
+- `error.400.moderation_reason_not_applicable` — a real reason code that this
+  target type does not accept was folded into `unknown_reason`. The remedies
+  differ: an unknown code means the client sent nonsense, a non-applicable one
+  means the form was built from a stale policy. New
+  `services.ReasonNotApplicable`.
+- `error.409.moderation_not_claimant` — releasing a case was unconditional, so
+  a second console tab could hand back a lease somebody else was working
+  under. A named moderator may now only release their own live lease; the
+  system sweeper and the `staff.role.revoked` handler pass no actor and are
+  never refused. New `services.NotClaimant`.
+
+**`error.400.moderation_evidence_invalid` had no remediation verb** (added in
+0.2.0 without one, so a client could not tell what to do about it):
+`fix_input`. `tests/test_contract.py` now gates the whole catalogue.
+
+### Changed
+
+- `presenters.present_case_detail(case, *, content=None)` — the extra keyword
+  is how the resolved content envelope reaches the DTO.
+- `serializers.ContentResponseSerializer` is gone: `ContentDTO` is now
+  serialized as a nested dataclass of the card, and a second hand-written
+  serializer for the same shape is a second place to drift.
+
 ## [0.2.0] — 2026-08-24
 
 ### Added

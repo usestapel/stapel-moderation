@@ -335,7 +335,20 @@
                       "reports": [],
                       "verdicts": [],
                       "sanctions": [],
-                      "appeals": []
+                      "appeals": [],
+                      "content": {
+                        "available": true,
+                        "error": "",
+                        "text": "Genuine Rolex, cash only, meet at the station.",
+                        "title": "Rolex Submariner",
+                        "language": "en",
+                        "media": [
+                          "cdn://photo/1"
+                        ],
+                        "author_id": "5cc26b64-0717-4562-b3fc-2c963f66a001",
+                        "url": "https://example.test/listings/412",
+                        "extra": {}
+                      }
                     }
                   }
                 }
@@ -1078,7 +1091,7 @@
       },
       "CaseDetailPresenterDTO": {
         "type": "object",
-        "description": "Presents one case card: the case, its complaints and its verdicts.\n\nThe target's live CONTENT is not here — it is fetched by the view through\n``content_function`` and attached as its own envelope, because a read that\ncan fail must be able to say so without failing the whole card.",
+        "description": "Presents one case card: the case, its complaints, verdicts and content.\n\n``content`` is the target's live text as read through the type's\n``content_function``. It is resolved by the caller (which knows who is\nasking) and handed to :func:`present_case_detail`, because a read that can\nfail must be able to say so without failing the whole card — but it is a\ndeclared field of this DTO, so the schema carries it like any other.",
         "properties": {
           "target_type": {
             "type": "string",
@@ -1140,6 +1153,14 @@
               "$ref": "#/components/schemas/AppealPresenterDTO"
             }
           },
+          "content": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ContentDTO"
+              }
+            ],
+            "description": "The target's live content, read when the card was opened. A failed read is a rendered state: available=false carries the reason (no_content_function, forbidden, target_not_found, not_loaded, or the unavailability message)."
+          },
           "subject_user_id": {
             "type": "string",
             "nullable": true
@@ -1159,6 +1180,7 @@
         },
         "required": [
           "appeals",
+          "content",
           "created_at",
           "id",
           "origin",
@@ -1293,6 +1315,43 @@
           "target_type",
           "updated_at"
         ]
+      },
+      "ContentDTO": {
+        "type": "object",
+        "description": "The target's live content, as read at the moment the card was opened.\n\n``available`` is explicit so the console can render a ``failed`` branch\ninstead of an empty card: a moderator must never decide about content\nnobody showed them.",
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "media": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "author_id": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "extra": {
+            "type": "object",
+            "additionalProperties": {}
+          }
+        }
       },
       "PolicyDisclosureDTO": {
         "type": "object",

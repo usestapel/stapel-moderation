@@ -42,6 +42,7 @@ from .errors import (
     ERR_400_INVALID_SANCTION_KIND,
     ERR_400_INVALID_TRANSITION,
     ERR_400_OWN_CONTENT,
+    ERR_400_REASON_NOT_APPLICABLE,
     ERR_400_UNKNOWN_REASON,
     ERR_400_UNKNOWN_TARGET_TYPE,
     ERR_403_CANNOT_REPORT,
@@ -54,8 +55,10 @@ from .errors import (
     ERR_409_ALREADY_APPEALED,
     ERR_409_ALREADY_REPORTED,
     ERR_409_CASE_CLAIMED,
+    ERR_409_APPEAL_RESOLVED,
     ERR_409_CASE_NOT_RESOLVED,
     ERR_409_CASE_RESOLVED,
+    ERR_409_NOT_CLAIMANT,
     ERR_409_SANCTION_NOT_ACTIVE,
     ERR_503_CONTENT_UNAVAILABLE,
 )
@@ -70,7 +73,6 @@ from .serializers import (
     CaseEventSerializer,
     CaseQuerySerializer,
     CaseSerializer,
-    ContentResponseSerializer,
     KeysetQuerySerializer,
     PolicyDisclosureResponseSerializer,
     PolicyQuerySerializer,
@@ -146,12 +148,21 @@ def _maps_errors(handler):
             return StapelErrorResponse(409, ERR_409_SANCTION_NOT_ACTIVE)
         except services.SameActor:
             return StapelErrorResponse(403, ERR_403_SAME_ACTOR)
+        except services.ReasonNotApplicable:
+            return StapelErrorResponse(400, ERR_400_REASON_NOT_APPLICABLE)
+        except services.NotClaimant:
+            return StapelErrorResponse(409, ERR_409_NOT_CLAIMANT)
         except services.AppealNotAllowed as exc:
             reason = str(exc)
             if reason == "already_appealed":
                 return StapelErrorResponse(409, ERR_409_ALREADY_APPEALED)
             if reason == "case_not_resolved":
                 return StapelErrorResponse(409, ERR_409_CASE_NOT_RESOLVED)
+            # A decided appeal is a STATE conflict, not a malformed outcome:
+            # answering 400 invalid_outcome sent the client back to fix a
+            # field that was never wrong.
+            if reason == "already_resolved":
+                return StapelErrorResponse(409, ERR_409_APPEAL_RESOLVED)
             return StapelErrorResponse(400, ERR_400_INVALID_OUTCOME)
         except services.InvalidTransition:
             return StapelErrorResponse(400, ERR_400_INVALID_TRANSITION)
@@ -386,18 +397,21 @@ class CaseDetailView(SerializerSeamMixin, APIView):
         if case is None:
             return StapelErrorResponse(404, ERR_404_CASE_NOT_FOUND)
 
-        body = self.get_response_serializer_class()(
-            presenters.present_case_detail(case)
-        ).data
         # The content read can fail, and a failed read is a RENDERED state,
         # not a failed request: the console shows the `failed` branch with the
         # reason. A moderator must never be handed an empty card that looks
-        # like empty content.
-        body["content"] = ContentResponseSerializer(_case_content(case)).data
-        return StapelResponse(body)
+        # like empty content. It is resolved here, where the actor is known,
+        # and handed to the presenter as a declared field of the card.
+        return StapelResponse(
+            self.get_response_serializer_class()(
+                presenters.present_case_detail(
+                    case, content=_case_content(case, actor_id=request.user.pk)
+                )
+            ).data
+        )
 
 
-def _case_content(case):
+def _case_content(case, *, actor_id):
     from .registry import check_can_view_content, resolve_policy_lenient
 
     policy = resolve_policy_lenient(case.target_type)
@@ -408,7 +422,9 @@ def _case_content(case):
     try:
         if not check_can_view_content(
             policy,
-            actor_id=None,
+            # The moderator asking, not None: the type's can_view_content
+            # callback exists to answer "may THIS person read it".
+            actor_id=actor_id,
             target_type=case.target_type,
             target_key=case.target_key,
         ):

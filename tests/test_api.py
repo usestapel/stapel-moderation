@@ -437,3 +437,132 @@ def test_rescan_sends_a_decided_case_back_through_the_screener(
     assert case.events.filter(kind="reopened").exists()
     # Every earlier verdict survives: the trail is append-only.
     assert case.verdicts.count() >= 3
+
+
+# ── The refusals the contract promised and never raised ──────────────
+
+
+def test_the_content_read_is_asked_on_behalf_of_the_moderator(
+    content_double, llm_double, lead_client, ts_lead
+):
+    """``can_view_content`` exists to answer "may THIS person read it".
+
+    It was being asked with ``actor_id=None``, so a deployment gating the
+    read per moderator saw every card requested by nobody — the gate was
+    decorative and its refusal was unreachable.
+    """
+    from stapel_core.comm import function
+
+    from stapel_moderation.registry import register_target_type
+
+    seen = {}
+
+    @function("listings.moderation_can_view")
+    def _can_view(payload):
+        seen.update(payload)
+        return {"allowed": str(payload.get("actor_id")) == str(ts_lead.pk)}
+
+    register_target_type(
+        "listing",
+        {
+            "intake_events": ["listing.submitted"],
+            "id_field": "listing_id",
+            "content_function": "listings.moderation_content",
+            "can_view_content": "listings.moderation_can_view",
+            "verdict_event": "moderation.completed",
+        },
+    )
+
+    case = _queued(llm_double)
+    response = lead_client.get(f"{BASE}/cases/{case.id}")
+    assert response.status_code == 200
+    assert seen["actor_id"] == str(ts_lead.pk)
+    assert response.data["content"]["available"] is True
+
+
+def test_a_read_the_target_refuses_renders_the_forbidden_branch(
+    content_double, llm_double, lead_client
+):
+    from stapel_core.comm import function
+
+    from stapel_moderation.registry import register_target_type
+
+    @function("listings.moderation_can_view")
+    def _can_view(payload):
+        return {"allowed": False}
+
+    register_target_type(
+        "listing",
+        {
+            "intake_events": ["listing.submitted"],
+            "id_field": "listing_id",
+            "content_function": "listings.moderation_content",
+            "can_view_content": "listings.moderation_can_view",
+            "verdict_event": "moderation.completed",
+        },
+    )
+
+    case = _queued(llm_double)
+    response = lead_client.get(f"{BASE}/cases/{case.id}")
+    assert response.status_code == 200
+    assert response.data["content"]["available"] is False
+    assert response.data["content"]["error"] == "forbidden"
+
+
+def test_a_reason_that_does_not_apply_here_is_not_an_unknown_reason(
+    content_double, auth_client
+):
+    """Two different mistakes, two different remedies: the code is nonsense
+    (fix the request) versus the form offered a choice this type never took
+    (reload the policy)."""
+    from stapel_moderation.registry import register_reason
+
+    register_reason(
+        "counterfeit",
+        {"severity": 2, "requires_description": False, "applies_to": ["review"]},
+    )
+
+    response = auth_client.post(
+        f"{BASE}/reports/",
+        {"target_type": "listing", "target_key": "42", "reason_code": "counterfeit"},
+        format="json",
+    )
+    assert response.status_code == 400, response.data
+    assert response.data["localizable_error"] == (
+        "error.400.moderation_reason_not_applicable"
+    )
+
+    unknown = auth_client.post(
+        f"{BASE}/reports/",
+        {"target_type": "listing", "target_key": "42", "reason_code": "no_such_reason"},
+        format="json",
+    )
+    assert unknown.status_code == 400
+    assert unknown.data["localizable_error"] == "error.400.moderation_unknown_reason"
+
+
+def test_a_moderator_cannot_release_a_lease_somebody_else_holds(
+    content_double, llm_double, client_for, ts_lead
+):
+    """One console tab must not yank a case out from under the person
+    reading it. The system sweeper still may — it passes no actor."""
+    from django.contrib.auth import get_user_model
+
+    case = _queued(llm_double)
+    assert client_for(ts_lead).post(f"{BASE}/cases/{case.id}/claim").status_code == 200
+
+    other = get_user_model().objects.create_user(
+        username="lead4", email="lead4@example.test", password="x", is_staff=True
+    )
+    other.staff_roles = ["ts_lead"]
+    refused = client_for(other).post(f"{BASE}/cases/{case.id}/release")
+    assert refused.status_code == 409, refused.data
+    assert refused.data["localizable_error"] == "error.409.moderation_not_claimant"
+
+    case.refresh_from_db()
+    assert str(case.claimed_by) == str(ts_lead.pk)
+
+    mine = client_for(ts_lead).post(f"{BASE}/cases/{case.id}/release")
+    assert mine.status_code == 200
+    case.refresh_from_db()
+    assert case.claimed_by is None

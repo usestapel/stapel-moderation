@@ -95,6 +95,14 @@ class CaseClaimedByAnother(ModerationError):
     """Another moderator holds a live lease on the case."""
 
 
+class NotClaimant(ModerationError):
+    """Acting on a lease somebody else holds.
+
+    Distinct from :class:`CaseClaimedByAnother`, which refuses TAKING a held
+    lease: this one refuses giving back a lease that was never yours.
+    """
+
+
 class AlreadyReported(ModerationError):
     """This reporter already has a report against this target."""
 
@@ -105,6 +113,15 @@ class OwnContent(ModerationError):
 
 class CannotReport(ModerationError):
     """The target policy's ``can_report`` callback said no."""
+
+
+class ReasonNotApplicable(ModerationError):
+    """A real reason code, but not one this target type accepts.
+
+    Separate from ``UnknownReason`` because the remedies differ: an unknown
+    code means the client sent nonsense, a non-applicable one means the form
+    offered a choice this target type never allowed.
+    """
 
 
 class TargetNotFound(ModerationError):
@@ -530,8 +547,13 @@ def submit_report(
     """
     policy = resolve_policy(target_type)
     reason = resolve_reason(reason_code)
-    if reason["system"] or not reason_applies(reason, target_type):
+    # A system reason is not part of the reporting vocabulary at all; a real
+    # reason that this type does not accept is a different refusal, because
+    # the form can only have offered it by reading a stale policy.
+    if reason["system"]:
         raise UnknownReason(reason_code)
+    if not reason_applies(reason, target_type):
+        raise ReasonNotApplicable(f"{reason_code}:{target_type}")
     if reason["requires_description"] and not (description or "").strip():
         raise ValueError("description_required")
     if not check_can_report(
@@ -762,11 +784,26 @@ def claim_case(case, *, actor_id) -> Case:
 
 
 def release_case(case, *, actor_id=None) -> Case:
-    """Give a claimed case back to the queue."""
+    """Give a claimed case back to the queue.
+
+    ``actor_id=None`` is the SYSTEM releasing (the stale sweeper, the
+    role-revoked handler) and is never refused. A named moderator may only
+    release a live lease that is their own — otherwise one console tab can
+    yank a case out from under the person reading it.
+    """
+    now = timezone.now()
     with transaction.atomic():
         case = Case.objects.select_for_update().get(pk=case.pk)
         if case.state != CaseState.CLAIMED:
             return case
+        if (
+            actor_id is not None
+            and case.claimed_by is not None
+            and str(case.claimed_by) != str(actor_id)
+            and case.claimed_until is not None
+            and case.claimed_until > now
+        ):
+            raise NotClaimant(str(case.claimed_by))
         case.claimed_by = None
         case.claimed_until = None
         case.save(update_fields=["claimed_by", "claimed_until", "updated_at"])
@@ -1413,7 +1450,9 @@ __all__ = [
     "InvalidSanctionKind",
     "InvalidTransition",
     "ModerationError",
+    "NotClaimant",
     "OwnContent",
+    "ReasonNotApplicable",
     "SameActor",
     "SanctionNotActive",
     "TargetContent",

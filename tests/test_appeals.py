@@ -183,3 +183,58 @@ def test_a_decided_appeal_is_not_decided_twice(
         services.resolve_appeal(
             appeal, outcome=AppealState.OVERTURNED, actor_id=moderator.pk
         )
+
+
+def _second_lead(username):
+    """A HIGH lead who did NOT decide the case — Art. 20 independence."""
+    from django.contrib.auth import get_user_model
+
+    reviewer = get_user_model().objects.create_user(
+        username=username, email=f"{username}@example.test", password="x", is_staff=True
+    )
+    reviewer.staff_roles = ["ts_lead"]
+    return reviewer
+
+
+def test_a_decided_appeal_answers_409_over_http_not_a_field_error(
+    content_double, llm_double, client_for, ts_lead, author_user
+):
+    """A decided appeal is a STATE conflict, not a malformed outcome.
+
+    It used to answer ``400 invalid_outcome``, which sends the console back
+    to fix a field that was never wrong, and left the registered
+    ``error.409.moderation_appeal_resolved`` unreachable.
+    """
+    case = _rejected_case(content_double, llm_double, ts_lead, author_user)
+    appeal = services.open_appeal(case, appellant_id=author_user.pk, body="Please.")
+
+    reviewer = client_for(_second_lead("lead5"))
+    first = reviewer.post(
+        f"/moderation/api/v1/appeals/{appeal.id}/resolve",
+        {"outcome": "upheld"},
+        format="json",
+    )
+    assert first.status_code == 200, first.data
+
+    second = reviewer.post(
+        f"/moderation/api/v1/appeals/{appeal.id}/resolve",
+        {"outcome": "overturned"},
+        format="json",
+    )
+    assert second.status_code == 409, second.data
+    assert second.data["localizable_error"] == "error.409.moderation_appeal_resolved"
+
+
+def test_an_outcome_word_that_does_not_exist_is_still_a_field_error(
+    content_double, llm_double, client_for, ts_lead, author_user
+):
+    case = _rejected_case(content_double, llm_double, ts_lead, author_user)
+    appeal = services.open_appeal(case, appellant_id=author_user.pk, body="Please.")
+
+    response = client_for(_second_lead("lead6")).post(
+        f"/moderation/api/v1/appeals/{appeal.id}/resolve",
+        {"outcome": "sideways"},
+        format="json",
+    )
+    assert response.status_code == 400, response.data
+    assert response.data["localizable_error"] == "error.400.moderation_invalid_outcome"
