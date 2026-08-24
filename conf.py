@@ -114,6 +114,13 @@ DEFAULTS = {
     # namespace instead (the workspaces/geo/forms canon). None disables
     # the throttle: a conscious act, never the default.
     "REPORT_THROTTLE": "20/h",
+    # Ceiling on one report's reporter-supplied `evidence` blob, measured on
+    # its compact JSON encoding. Evidence exists for targets whose content
+    # nobody serves (an ephemeral chat message); it is not a file channel and
+    # not a second description field, so the bound is small and hard: over it
+    # the report is refused (400), never truncated — a half-quoted message is
+    # a moderator deciding on text nobody sent.
+    "MAX_EVIDENCE_BYTES": 8192,
 
     # ── Appeals (spec §12, DSA Art. 20) ──────────────────────────────
     # The moderator who decided may not decide the appeal. A one-moderator

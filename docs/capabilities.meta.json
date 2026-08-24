@@ -401,6 +401,27 @@
     "get_moderation_beat_schedule": {
       "kind": "factory",
       "intent": "The beat entries for every scheduled job, on the configured cadences — so a host wires them all at once instead of remembering four names."
+    },
+    "validate_evidence": {
+      "kind": "gate_function",
+      "intent": "Normalize and bound one report's reporter-supplied evidence against its target type's policy — refusing evidence on a type that has a content_function, a non-object blob, and anything over MAX_EVIDENCE_BYTES.",
+      "instead_of": [
+        "storing request.data['evidence'] on the Report unchecked"
+      ]
+    },
+    "evidence_content": {
+      "kind": "factory",
+      "intent": "Assemble a TargetContent from a reporter's attestation for a target nobody serves, stamped source='evidence'/verified=False so no console can render it as content the platform read.",
+      "instead_of": [
+        "passing a raw evidence dict to the screener or the case card"
+      ]
+    },
+    "stored_evidence": {
+      "kind": "factory",
+      "intent": "The newest attestation on file for an evidence-based target — what a case card, a re-screen and an appeal read, because there is no owner to ask.",
+      "instead_of": [
+        "Report.objects.filter(...).first().evidence"
+      ]
     }
   }
 }

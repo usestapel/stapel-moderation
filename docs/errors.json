@@ -170,6 +170,14 @@
     "owner": "stapel_moderation"
   },
   {
+    "code": "error.400.moderation_evidence_invalid",
+    "status": 400,
+    "params": [],
+    "remediation": "fix_input",
+    "en": "This report's attached evidence is not accepted here",
+    "owner": "stapel_moderation"
+  },
+  {
     "code": "error.400.moderation_invalid_decision",
     "status": 400,
     "params": [],

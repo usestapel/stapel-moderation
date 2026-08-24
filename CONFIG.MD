@@ -86,6 +86,7 @@ claim that every key is settable from a shell:
 |-----|--------|---------|----------|---------|
 | ALLOW_ANONYMOUS_REPORTS | env | **Closed.** Opening it makes `contact_email` mandatory and demands a captcha; without one, prints `moderation.W003`. | no | `False` |
 | REPORT_THROTTLE | env | DRF scoped rate for the report endpoint. A library cannot own `DEFAULT_THROTTLE_RATES`, so the rate lives here. `None` disables — a conscious act. | no | `20/h` |
+| MAX_EVIDENCE_BYTES | env | Ceiling on one report's reporter-supplied `evidence` blob (compact JSON, UTF-8 bytes). Only target types that declared `evidence: True` accept one at all; over the bound the report is **refused**, never truncated. | no | `8192` |
 
 ### Appeals (source: env)
 

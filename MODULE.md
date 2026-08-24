@@ -44,7 +44,8 @@ a plain dict, never an ABC.
 | `gate` | `GATE_DEFAULT` (`"post"`) | Whether the target is live while under review. |
 | `intake_events` | `()` | Topics that open a case for this type. Subscribed at `ready()` **and** on runtime registration. |
 | `id_field` | `"target_key"` | The payload key the target's `content_function` expects its id under (`listing_id`, `review_id`). |
-| `content_function` | — **required** | comm Function returning the target's live content. Missing = `E004`. |
+| `content_function` | — **required unless `evidence`** | comm Function returning the target's live content. Missing = `E004`. |
+| `evidence` | `False` | This target's content is served by NOBODY, so a report carries the reporter's own snapshot and that is what is screened and shown. Mutually exclusive with `content_function` (`E007`). |
 | `verdict_event` | `"moderation.completed"` | Topic the verdict travels on. Explicit `None` = "this target consumes no verdict", a statement rather than an omission. |
 | `notification_types` | `{}` | `"content_blocked"` → the notification type announcing a takedown. |
 | `can_report` | `None` | comm Function; `None` = any authenticated user (fail-OPEN). |
@@ -52,6 +53,38 @@ a plain dict, never an ABC.
 | `reasons` | `["*"]` | Which reason codes apply to this type. |
 | `screen` / `media` | `True` / `True` | Run the automatic stage; include images in it. |
 | `severity_floor` | `0` | Minimum queue severity for this type. |
+
+#### Evidence-based types (0.2.0)
+
+The whole module is built on "never store a copy of the content, ask the
+owner at the moment you need it". An **ephemeral** target has no owner to
+ask: a chat message, a story, a frame of a live stream. Screening the intake
+event's payload is the copy-shaped defect; refusing the complaint is worse.
+
+So a type declares `"evidence": True` and drops `content_function`. Then:
+
+- a report may carry `evidence` — a bounded JSON object
+  (`MAX_EVIDENCE_BYTES`, default 8192, **refused over the bound, never
+  truncated**) whose `text` / `title` / `language` / `media` / `author_id` /
+  `url` fill a `TargetContent` and whose other keys ride along in `extra`;
+- the assembled content is stamped `source: "evidence"`, `verified: false`.
+  A console renders it as *reported as*, never as the platform's own read;
+- a later read (case card, re-screen, appeal) takes the **newest** report's
+  attestation — `services.stored_evidence`, the one place this module reads
+  content it stored, confined to the types that have nothing to fetch;
+- a target with no attestation on file is `TargetNotFound` (404), not
+  `ContentUnavailable` (503): nothing is down, there is nothing to look at;
+- evidence sent for a type that DOES have a `content_function` is a 400
+  (`error.400.moderation_evidence_invalid`) — a snapshot beside a live read
+  is a second, staler answer to the same question.
+
+**Stated limitation.** `author_id` in evidence is an *accusation*, not a
+fact: nobody in the fleet can confirm who wrote a message no service serves.
+It still becomes `Case.subject_user_id`, because otherwise the sanction
+ladder has no subject at all — but every render of it says `verified: false`,
+and a host that can narrow it (a marketplace whose direct threads have
+exactly two parties, so "the other one" is server-derivable) should derive it
+rather than trust the client. stapel-classified does exactly that.
 
 ### Reasons — `STAPEL_MODERATION["REASONS"]` (MERGE registry)
 
@@ -85,7 +118,10 @@ here rather than forking. Default:
 ### Serializer seams (`views.py`)
 
 `SerializerSeamMixin` — subclass a view, set `request_serializer_class` /
-`response_serializer_class`, remount the URL.
+`response_serializer_class`, remount the URL. Since 0.2.0 it is **core's**
+(`stapel_core.django.api.views`, hoisted in core 0.37.0), not a local copy;
+the attribute and getter names are unchanged, so an existing subclass keeps
+working.
 
 ### `NotSanctioned` (a permission class for the HOST)
 

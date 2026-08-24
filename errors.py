@@ -12,6 +12,7 @@ ERR_400_UNKNOWN_TARGET_TYPE = "error.400.moderation_unknown_target_type"
 ERR_400_UNKNOWN_REASON = "error.400.moderation_unknown_reason"
 ERR_400_REASON_NOT_APPLICABLE = "error.400.moderation_reason_not_applicable"
 ERR_400_DESCRIPTION_REQUIRED = "error.400.moderation_description_required"
+ERR_400_EVIDENCE_INVALID = "error.400.moderation_evidence_invalid"
 
 # ── Intake ───────────────────────────────────────────────────────────
 ERR_400_OWN_CONTENT = "error.400.moderation_own_content"
@@ -49,6 +50,7 @@ STAPEL_MODERATION_ERRORS = {
     ERR_400_UNKNOWN_REASON: "Unknown report reason",
     ERR_400_REASON_NOT_APPLICABLE: "That reason does not apply to this kind of target",
     ERR_400_DESCRIPTION_REQUIRED: "This reason requires an explanation",
+    ERR_400_EVIDENCE_INVALID: "This report's attached evidence is not accepted here",
     ERR_400_OWN_CONTENT: "You cannot report your own content",
     ERR_400_CONTACT_REQUIRED: "An anonymous report must carry a contact address",
     ERR_403_CANNOT_REPORT: "You may not report this target",

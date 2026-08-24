@@ -284,6 +284,14 @@ class Report(models.Model):
     reporter_id = models.UUIDField(null=True, blank=True, db_index=True)
     reason_code = models.CharField(max_length=64)
     description = models.TextField(blank=True, default="")
+    #: Reporter-supplied snapshot of the target, for target types whose
+    #: content NOBODY serves — an ephemeral chat message, a story, a live
+    #: stream frame. Accepted only where the policy says ``evidence: True``,
+    #: bounded by ``MAX_EVIDENCE_BYTES``, and ALWAYS unverified: it is what
+    #: the complainant says they saw, never what the platform read. The
+    #: content assembled from it is marked ``source: "evidence"`` so no
+    #: console can render it as if a content_function had answered.
+    evidence = models.JSONField(default=dict, blank=True)
     #: DSA Art. 16(2)(d) — the good-faith declaration.
     good_faith = models.BooleanField(default=False)
     #: DSA Art. 16(2)(c) — a contact for the anonymous intake mode.

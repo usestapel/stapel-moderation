@@ -1,6 +1,6 @@
 {
   "module": "stapel-moderation",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "provides": "The fleet's single producer of moderation verdicts: one target-generic queue over listings, reviews, chat messages and profiles, keyed by an opaque (target_type, target_key) and driven by a host-registered policy per type. One Case per target however many people complain, one status vocabulary in the whole module, an append-only Verdict and an append-only CaseEvent audit trail whose mutations are FORBIDDEN by mandate declaration. Screening is a comm-Task (deterministic rules, then schema-constrained llm.complete) with a closed hold-for-a-human default when the automation cannot answer. Resolution ACTS on the target by emitting moderation.completed, which stapel-listings and stapel-reviews already consume. Sanctions carry a kind, a scope, a reason, a clock, an appeal and an audit trail, and they bite through core's cross-service user blacklist — the hook every request path already checked and nobody had ever called. Plus DSA artefacts generated from the registries: a public policy disclosure, a statement of reasons on every takedown, an acknowledgement to every complainant, and an internal appeal heard by a different moderator.",
   "axes": [
     {
@@ -355,6 +355,15 @@
       ]
     },
     {
+      "name": "evidence_content",
+      "kind": "factory",
+      "path": "stapel_moderation.services.evidence_content",
+      "intent": "Assemble a TargetContent from a reporter's attestation for a target nobody serves, stamped source='evidence'/verified=False so no console can render it as content the platform read.",
+      "instead_of": [
+        "passing a raw evidence dict to the screener or the case card"
+      ]
+    },
+    {
       "name": "fetch_content",
       "kind": "factory",
       "path": "stapel_moderation.services.fetch_content",
@@ -521,6 +530,15 @@
       ]
     },
     {
+      "name": "stored_evidence",
+      "kind": "factory",
+      "path": "stapel_moderation.services.stored_evidence",
+      "intent": "The newest attestation on file for an evidence-based target — what a case card, a re-screen and an appeal read, because there is no owner to ask.",
+      "instead_of": [
+        "Report.objects.filter(...).first().evidence"
+      ]
+    },
+    {
       "name": "submit_report",
       "kind": "factory",
       "path": "stapel_moderation.services.submit_report",
@@ -536,6 +554,15 @@
       "intent": "Move a case along a DECLARED edge and audit it in the same transaction; an undeclared edge raises instead of being assigned.",
       "instead_of": [
         "Case.state = ...; case.save()"
+      ]
+    },
+    {
+      "name": "validate_evidence",
+      "kind": "gate_function",
+      "path": "stapel_moderation.services.validate_evidence",
+      "intent": "Normalize and bound one report's reporter-supplied evidence against its target type's policy — refusing evidence on a type that has a content_function, a non-object blob, and anything over MAX_EVIDENCE_BYTES.",
+      "instead_of": [
+        "storing request.data['evidence'] on the Report unchecked"
       ]
     },
     {

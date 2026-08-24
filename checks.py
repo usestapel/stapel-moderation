@@ -51,7 +51,7 @@ def check_target_types(app_configs, **kwargs):
                 f"'post' exist.",
                 id="stapel_moderation.E003",
             ))
-        if not policy.get("content_function"):
+        if not policy.get("content_function") and not policy.get("evidence"):
             errors.append(checks.Error(
                 f"Target type {name!r} declares no 'content_function'. The "
                 f"module never stores or receives target content — without "
@@ -59,8 +59,22 @@ def check_target_types(app_configs, **kwargs):
                 f"moderator gets an empty card.",
                 hint="Add \"content_function\": \"<module>.moderation_content\" "
                      "to the policy (listings.moderation_content, "
-                     "reviews.moderation_content).",
+                     "reviews.moderation_content) — or declare "
+                     "\"evidence\": True if this target's content is served "
+                     "by nobody and a report must carry the reporter's own "
+                     "snapshot of it.",
                 id="stapel_moderation.E004",
+            ))
+        if policy.get("evidence") and policy.get("content_function"):
+            errors.append(checks.Error(
+                f"Target type {name!r} declares BOTH a 'content_function' and "
+                f"'evidence': True. One target has one source of truth — an "
+                f"owner that answers, or a reporter's attestation because no "
+                f"owner exists. Two would let a case card show the live "
+                f"content while the verdict was screened on the snapshot.",
+                hint="Drop 'evidence' if the owner serves the content; drop "
+                     "'content_function' if it does not.",
+                id="stapel_moderation.E007",
             ))
 
     known_reasons = set(get_reasons())
@@ -281,9 +295,10 @@ def check_verdict_consumers(app_configs, **kwargs):
     warnings = []
     for name, policy in get_target_types().items():
         content_function = (policy or {}).get("content_function")
-        if not content_function:
-            continue  # E004 already covers it
-        reason = function_unreachable_reason(content_function)
+        # No content function: either E004 already covers it, or the type is
+        # evidence-based — and an evidence-based type HAS its content source
+        # (the report), so there is nothing unreachable to probe.
+        reason = function_unreachable_reason(content_function) if content_function else ""
         if reason:
             warnings.append(checks.Warning(
                 f"Target type {name!r} names content_function "

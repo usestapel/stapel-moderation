@@ -131,6 +131,16 @@ class ReportPresenter(Presenter):
             help_text="Null once the reporter's account was erased.",
         ),
         "created_at": PresenterField(type=str, source=lambda dao: dao.created_at.isoformat()),
+        "evidence": PresenterField(
+            type=dict,
+            source=lambda dao: dict(dao.evidence or {}),
+            default=dict,
+            help_text=(
+                "The reporter's own snapshot of a target nobody serves "
+                "(evidence-based target types). Unverified by construction: "
+                "render it as what the complainant says they saw."
+            ),
+        ),
     }
 
 

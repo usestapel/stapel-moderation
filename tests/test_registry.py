@@ -56,6 +56,7 @@ def test_every_policy_key_is_defaulted_so_no_call_site_guesses(db):
         "intake_events",
         "id_field",
         "content_function",
+        "evidence",
         "verdict_event",
         "notification_types",
         "can_report",

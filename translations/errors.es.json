@@ -1,6 +1,7 @@
 {
   "error.400.moderation_contact_required": "Una denuncia anónima debe incluir una dirección de contacto",
   "error.400.moderation_description_required": "Este motivo requiere una explicación",
+  "error.400.moderation_evidence_invalid": "La evidencia adjunta a este reporte no se acepta aquí",
   "error.400.moderation_invalid_decision": "Decisión de moderación desconocida",
   "error.400.moderation_invalid_outcome": "Resultado de apelación desconocido",
   "error.400.moderation_invalid_sanction_kind": "Tipo de sanción desconocido",

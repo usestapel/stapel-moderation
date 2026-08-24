@@ -28,6 +28,7 @@ from stapel_core.django.api.permissions import (
     ANONYMOUS_DENIED,
     IsNotAnonymousUser,
 )
+from stapel_core.django.api.views import SerializerSeamMixin
 
 from . import presenters, services
 from .authz import HasModerationMandate
@@ -35,6 +36,7 @@ from .conf import moderation_settings
 from .errors import (
     ERR_400_CONTACT_REQUIRED,
     ERR_400_DESCRIPTION_REQUIRED,
+    ERR_400_EVIDENCE_INVALID,
     ERR_400_INVALID_DECISION,
     ERR_400_INVALID_OUTCOME,
     ERR_400_INVALID_SANCTION_KIND,
@@ -84,24 +86,6 @@ from .serializers import (
     VerdictRequestSerializer,
     VerdictSerializer,
 )
-
-
-class SerializerSeamMixin:
-    """Overridable serializer seam for every stapel-moderation APIView.
-
-    Host projects swap the request/response serializer of any view by
-    subclassing and setting ``request_serializer_class`` /
-    ``response_serializer_class`` — no need to rewrite the method bodies.
-    """
-
-    request_serializer_class = None
-    response_serializer_class = None
-
-    def get_request_serializer_class(self):
-        return self.request_serializer_class
-
-    def get_response_serializer_class(self):
-        return self.response_serializer_class
 
 
 class ReportThrottle(ScopedRateThrottle):
@@ -174,6 +158,8 @@ def _maps_errors(handler):
         except ValueError as exc:
             if str(exc) == "description_required":
                 return StapelErrorResponse(400, ERR_400_DESCRIPTION_REQUIRED)
+            if str(exc) == "evidence_invalid":
+                return StapelErrorResponse(400, ERR_400_EVIDENCE_INVALID)
             raise
 
     return wrapper
@@ -224,6 +210,7 @@ class ReportListCreateView(SerializerSeamMixin, APIView):
             good_faith=bool(data.get("good_faith")),
             contact_email=data.get("contact_email") or "",
             scope_key=data.get("scope_key") or "",
+            evidence=data.get("evidence") or {},
         )
         return StapelResponse(
             self.get_response_serializer_class()(
@@ -414,7 +401,7 @@ def _case_content(case):
     from .registry import check_can_view_content, resolve_policy_lenient
 
     policy = resolve_policy_lenient(case.target_type)
-    if not policy["content_function"]:
+    if not policy["content_function"] and not policy["evidence"]:
         return presenters.present_content(
             None, available=False, error="no_content_function"
         )

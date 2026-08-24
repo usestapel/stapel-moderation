@@ -119,6 +119,13 @@ class ReportCreateSerializer(serializers.Serializer):
     scope_key = serializers.CharField(
         required=False, allow_blank=True, default="", max_length=255
     )
+    #: The reporter's own snapshot of a target nobody serves — an ephemeral
+    #: chat message, a story. Accepted only where the target type declared
+    #: ``evidence: True``, and always rendered as an attestation rather than
+    #: as content the platform read. Whether this type takes evidence at all,
+    #: and whether the blob fits MAX_EVIDENCE_BYTES, are registry/settings
+    #: questions and are therefore answered in the service, not here.
+    evidence = serializers.JSONField(required=False, default=dict)
 
 
 class KeysetQuerySerializer(serializers.Serializer):

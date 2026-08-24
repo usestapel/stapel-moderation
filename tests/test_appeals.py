@@ -129,7 +129,7 @@ def test_an_overturn_reopens_and_re_decides_the_case(
 def test_an_overturn_lifts_the_sanction_it_was_about(
     content_double, llm_double, ts_lead, moderator, author_user
 ):
-    from django.core.cache import cache
+    from stapel_core.django.jwt.authentication import is_user_blacklisted
 
     case = _rejected_case(content_double, llm_double, ts_lead, author_user)
     sanction = services.issue_sanction(
@@ -138,7 +138,7 @@ def test_an_overturn_lifts_the_sanction_it_was_about(
         kind=SanctionKind.SUSPENDED,
         issued_by=ts_lead.pk,
     )
-    assert cache.get(f"user_blacklisted:{author_user.pk}") is not None
+    assert is_user_blacklisted(str(author_user.pk))
 
     appeal = services.open_appeal(
         case, appellant_id=author_user.pk, body="Wrong person.", sanction=sanction
@@ -151,7 +151,7 @@ def test_an_overturn_lifts_the_sanction_it_was_about(
     # `overturned`, not `lifted`: one is discretion, the other is the
     # platform having been wrong, and the distinction is the record.
     assert sanction.state == SanctionState.OVERTURNED
-    assert cache.get(f"user_blacklisted:{author_user.pk}") is None
+    assert not is_user_blacklisted(str(author_user.pk))
 
 
 def test_an_upheld_appeal_changes_nothing_but_the_record(

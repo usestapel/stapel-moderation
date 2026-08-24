@@ -1367,7 +1367,8 @@
             "type": "string",
             "default": "",
             "maxLength": 255
-          }
+          },
+          "evidence": {}
         },
         "required": [
           "reason_code",
@@ -1401,6 +1402,11 @@
             "type": "string",
             "nullable": true,
             "description": "Null once the reporter's account was erased."
+          },
+          "evidence": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "The reporter's own snapshot of a target nobody serves (evidence-based target types). Unverified by construction: render it as what the complainant says they saw."
           }
         },
         "required": [

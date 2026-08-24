@@ -111,8 +111,16 @@ def resolve_policy(target_type: str) -> dict:
         "gate": raw.get("gate", moderation_settings.GATE_DEFAULT),
         "intake_events": tuple(raw.get("intake_events") or ()),
         "id_field": raw.get("id_field") or "target_key",
-        # Where the content comes from. Mandatory — checks.E004.
+        # Where the content comes from. Mandatory — checks.E004 — UNLESS the
+        # type is evidence-based (below), which is the one case where there
+        # is no owner in the fleet to ask.
         "content_function": raw.get("content_function") or "",
+        # Evidence-based type: the target's content is not served by anybody,
+        # so a report carries the reporter's own snapshot of it and THAT is
+        # what the screener and the moderator read. Declared per type rather
+        # than inferred from a missing content_function, because "nobody
+        # serves this" must be a statement, not an omission.
+        "evidence": bool(raw.get("evidence", False)),
         # How the verdict reaches the target. Explicit None = "this target
         # consumes no verdict", a statement rather than an omission.
         "verdict_event": (
@@ -138,6 +146,7 @@ UNREGISTERED_POLICY = {
     "intake_events": (),
     "id_field": "target_key",
     "content_function": "",
+    "evidence": False,
     "verdict_event": None,
     "notification_types": {},
     "can_report": None,

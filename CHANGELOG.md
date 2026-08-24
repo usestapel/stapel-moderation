@@ -4,6 +4,55 @@ All notable changes to stapel-moderation are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Pre-1.0 semver: **minor = breaking**, patch = compatible.
 
+## [0.2.0] — 2026-08-24
+
+### Added
+
+**Evidence-based target types** — a complaint about content NOBODY serves.
+Every target so far had an owner answering `*.moderation_content`; a chat
+message has none, and by the time a moderator opens the case the thing may
+exist only in the complainant's screenshot. A policy now declares
+`"evidence": True` instead of a `content_function`, a report carries the
+reporter's own snapshot in the new `Report.evidence` JSON field, and the
+content assembled from it is stamped `source: "evidence"`, `verified: false`
+so no console can render an attestation as something the platform read.
+
+- `Report.evidence` (migration `0002_report_evidence`) — additive, nullable
+  by default (`{}`), no backfill.
+- `services.validate_evidence` / `evidence_content` / `stored_evidence`, and
+  `submit_report(..., evidence=...)`; `fetch_content(..., evidence=...)`.
+- `MAX_EVIDENCE_BYTES` (default 8192). Over the bound the report is refused,
+  never truncated — a half-quoted message is a moderator deciding on text
+  nobody sent.
+- `error.400.moderation_evidence_invalid` (+ ru/es catalogues): evidence on a
+  type that serves its own content, a non-object blob, or an oversized one.
+- `stapel_moderation.E007`: declaring BOTH a `content_function` and
+  `evidence` — one target, one source of truth. `E004` did not become
+  optional; it grew exactly one alternative.
+- An evidence type with no attestation on file reads as `TargetNotFound`
+  (404), not `ContentUnavailable` (503): nothing is down, there is nothing to
+  look at.
+
+This is what lets stapel-classified register `chat_message` and `seller`
+target types without stapel-chat or stapel-profiles shipping a content
+function first — see that composite's MODULE.md.
+
+### Changed
+
+- The module's `SerializerSeamMixin` is now **core's** hoisted one
+  (`stapel_core.django.api.views`, core 0.37.0) rather than a 24th local copy.
+  Same two attributes, same two getters: a host subclass is unaffected.
+- Floor raised to `stapel-core>=0.43`.
+
+### Fixed
+
+- The sanction/appeal tests asserted on the raw cache key
+  `user_blacklisted:<id>`. core 0.43.0 moved the user blacklist into the
+  shared revocation namespace (`stapel_core.core.revocation_store`) so one ban
+  is visible to every service verifying the same tokens; the tests now ask
+  `is_user_blacklisted()`, which is the contract. Six red tests that were
+  asserting a key layout, not a behaviour.
+
 ## [0.1.0] — 2026-08-21
 
 First release. The fleet's single producer of moderation verdicts.

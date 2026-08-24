@@ -8,8 +8,11 @@ no live session at all: ``is_active`` is only consulted when a new token is
 issued.
 """
 import pytest
-from django.core.cache import cache
 from stapel_core.comm import mutate_and_emit
+from stapel_core.django.jwt.authentication import (
+    is_user_blacklisted,
+    unblacklist_user,
+)
 
 from stapel_moderation import services
 from stapel_moderation.models import (
@@ -21,11 +24,18 @@ from stapel_moderation.models import (
 
 pytestmark = pytest.mark.django_db
 
-BLACKLIST_KEY = "user_blacklisted:{user_id}"
-
-
 def _blacklisted(user_id) -> bool:
-    return cache.get(BLACKLIST_KEY.format(user_id=user_id)) is not None
+    """Ask core, never the raw cache key.
+
+    core 0.43.0 moved the user blacklist into the SHARED revocation namespace
+    (``stapel_core.core.revocation_store``) so one ban is visible to every
+    service verifying the same tokens, whatever each service's own cache
+    KEY_PREFIX is. A test that reads ``cache.get("user_blacklisted:<id>")``
+    is asserting on the pre-0.43 key layout and goes red while the ban is in
+    fact stored — which is exactly what happened here. The public reader is
+    the contract; the key is not.
+    """
+    return is_user_blacklisted(str(user_id))
 
 
 def _case(key="42"):
@@ -117,7 +127,7 @@ def test_rearm_restores_a_key_the_cache_ttl_dropped(
         kind=SanctionKind.SUSPENDED,
         issued_by=ts_lead.pk,
     )
-    cache.delete(BLACKLIST_KEY.format(user_id=author_user.pk))
+    unblacklist_user(str(author_user.pk))
     assert not _blacklisted(author_user.pk)
 
     assert rearm_active_sanctions()["rearmed"] == 1

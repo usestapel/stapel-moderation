@@ -24,13 +24,13 @@ pip install stapel-moderation
 
 | Fact | Value |
 |---|---|
-| Version | `0.1.0` |
+| Version | `0.2.0` |
 | Python | `>=3.11` (3.11, 3.12, 3.13) |
 | HTTP operations | 18 |
 | Config axes | 11 |
-| Usage surface | 56 |
+| Usage surface | 59 |
 | Extension points | 6 |
-| Error codes | 69 |
+| Error codes | 70 |
 | Fleet dependencies | [`stapel-agent`](https://github.com/usestapel/stapel-agent) (optional) · [`stapel-auth`](https://github.com/usestapel/stapel-auth) (optional) · [`stapel-cdn`](https://github.com/usestapel/stapel-cdn) (optional) · [`stapel-core`](https://github.com/usestapel/stapel-core) · [`stapel-notifications`](https://github.com/usestapel/stapel-notifications) (optional) |
 
 ## Documentation

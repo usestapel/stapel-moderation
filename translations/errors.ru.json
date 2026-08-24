@@ -1,6 +1,7 @@
 {
   "error.400.moderation_contact_required": "Анонимная жалоба должна содержать контакт для связи",
   "error.400.moderation_description_required": "Для этой причины нужно пояснение",
+  "error.400.moderation_evidence_invalid": "Приложенное к жалобе свидетельство здесь не принимается",
   "error.400.moderation_invalid_decision": "Неизвестное решение модерации",
   "error.400.moderation_invalid_outcome": "Неизвестный исход апелляции",
   "error.400.moderation_invalid_sanction_kind": "Неизвестный вид санкции",

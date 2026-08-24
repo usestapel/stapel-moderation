@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import timedelta
 from typing import Optional
 
@@ -182,7 +182,85 @@ class TargetContent:
         }
 
 
-def fetch_content(target_type: str, target_key: str, *, policy: Optional[dict] = None) -> TargetContent:
+#: Keys an evidence blob may fill on a :class:`TargetContent`. Everything
+#: else the reporter sends is carried through into ``extra`` verbatim — the
+#: chat-attachment rule (an unknown field is data, an unknown *shape* is not).
+EVIDENCE_CONTENT_KEYS = ("text", "title", "language", "media", "author_id", "url")
+
+
+def evidence_content(evidence: Optional[dict]) -> TargetContent:
+    """Build a :class:`TargetContent` out of a reporter's attestation.
+
+    Marked ``source: "evidence"`` in ``extra`` and therefore in the case
+    card's ``content.extra``: a console renders it as "reported as", never as
+    the platform's own read. Nothing here is verified and nothing here can be
+    — that is the whole point of the type existing, and the honest place to
+    say so is the payload, not a comment.
+    """
+    raw = dict(evidence or {})
+    known = {key: raw.get(key) for key in EVIDENCE_CONTENT_KEYS}
+    rest = {key: value for key, value in raw.items() if key not in EVIDENCE_CONTENT_KEYS}
+    content = TargetContent.from_result({**known, **rest})
+    extra = dict(content.extra or {})
+    extra["source"] = "evidence"
+    extra["verified"] = False
+    return replace(content, extra=extra)
+
+
+def stored_evidence(target_type: str, target_key: str) -> dict:
+    """The most recent attestation on file for one target.
+
+    An evidence-based target has no owner to ask, so a re-screen, a case card
+    opened six hours later and an appeal all read the newest report's
+    snapshot. This is the ONE place the module reads content it stored
+    instead of content it fetched, and it is confined to types that declared
+    ``evidence: True`` precisely because for them there is nothing to fetch.
+    """
+    row = (
+        Report.objects.filter(target_type=target_type, target_key=target_key)
+        .exclude(evidence={})
+        .order_by("-created_at")
+        .values_list("evidence", flat=True)
+        .first()
+    )
+    return dict(row or {})
+
+
+def validate_evidence(policy: dict, evidence: Optional[dict]) -> dict:
+    """Normalize one report's attestation against its target's policy.
+
+    Three refusals, all ``ValueError("evidence_invalid")`` so the view maps
+    one key: evidence on a type that does not take it (a snapshot next to a
+    live content_function is a second, staler answer), evidence that is not a
+    JSON object, and evidence over ``MAX_EVIDENCE_BYTES``. Over the bound the
+    report is refused rather than truncated — see the setting's comment.
+    """
+    import json
+
+    from .conf import moderation_settings
+
+    if evidence in (None, {}):
+        return {}
+    if not policy.get("evidence"):
+        raise ValueError("evidence_invalid")
+    if not isinstance(evidence, dict):
+        raise ValueError("evidence_invalid")
+    try:
+        encoded = json.dumps(evidence, ensure_ascii=False, separators=(",", ":"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("evidence_invalid") from exc
+    if len(encoded.encode("utf-8")) > int(moderation_settings.MAX_EVIDENCE_BYTES):
+        raise ValueError("evidence_invalid")
+    return evidence
+
+
+def fetch_content(
+    target_type: str,
+    target_key: str,
+    *,
+    policy: Optional[dict] = None,
+    evidence: Optional[dict] = None,
+) -> TargetContent:
     """Read a target's live content through its policy's ``content_function``.
 
     Not from the intake event, and not from a stored copy — the two things
@@ -206,6 +284,14 @@ def fetch_content(target_type: str, target_key: str, *, policy: Optional[dict] =
 
     policy = policy or resolve_policy(target_type)
     name = policy.get("content_function")
+    if policy.get("evidence"):
+        blob = evidence if evidence is not None else stored_evidence(target_type, target_key)
+        if not blob:
+            # No attestation and no owner to ask: the target is, as far as
+            # this module can ever know, gone. 404 rather than 503 — nothing
+            # is down, there is simply nothing to look at.
+            raise TargetNotFound(f"{target_type}:{target_key}")
+        return evidence_content(blob)
     if not name:
         raise ContentUnavailable(f"{target_type} declares no content_function")
     payload = {content_payload_key(policy): target_key}
@@ -432,6 +518,7 @@ def submit_report(
     good_faith: bool = False,
     contact_email: str = "",
     scope_key: str = "",
+    evidence: Optional[dict] = None,
 ) -> tuple[Report, Case]:
     """Accept one complaint: open or join the case, record the report, count it.
 
@@ -452,7 +539,8 @@ def submit_report(
     ):
         raise CannotReport(f"{target_type}:{target_key}")
 
-    content = fetch_content(target_type, target_key, policy=policy)
+    evidence = validate_evidence(policy, evidence)
+    content = fetch_content(target_type, target_key, policy=policy, evidence=evidence)
     if content.author_id and reporter_id and str(content.author_id) == str(reporter_id):
         raise OwnContent(target_key)
 
@@ -478,6 +566,7 @@ def submit_report(
                     description=description or "",
                     good_faith=bool(good_faith),
                     contact_email=contact_email or "",
+                    evidence=evidence,
                 )
         except IntegrityError as exc:
             # uniq_report_per_user — a real constraint this time, not legacy's
