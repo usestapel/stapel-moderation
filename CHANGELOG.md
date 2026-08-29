@@ -4,6 +4,36 @@ All notable changes to stapel-moderation are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Pre-1.0 semver: **minor = breaking**, patch = compatible.
 
+## [0.3.1] — 2026-08-30
+
+### Fixed — a malformed id in an action payload was a poison pill
+
+`ValidationError` is not a `ValueError`. Django answers a key it cannot coerce
+to a column's type — a malformed UUID above all — with
+`django.core.exceptions.ValidationError`, which does **not** subclass
+`ValueError` or `TypeError`. The `user.deleted` / `user.merged` guards here
+caught only `(ValueError, TypeError)`, so a bad id walked straight through
+them, the handler raised, `consume_actions` re-raised to the bus, and the
+event came back forever: a redelivery loop over a payload no retry can repair,
+burning the consumer's retry budget while looking exactly like a downstream
+outage.
+
+The consumed contracts do not save anyone from this. They type an id as
+`{"type": "string"}` — and where they do say `format: uuid`, `jsonschema`
+does not enforce `format` unless a format checker is passed, which the comm
+registry does not do. A malformed id is a well-formed payload.
+
+Three handlers addressed rows by an id straight out of a payload with no guard
+at all, and each of them raised `ValidationError` on a malformed one:
+`handle_user_deleted` (the reporter erasure), `handle_staff_role_revoked` (the
+lease release) and `handle_own_verdict` (the case lookup behind the takedown
+notification). All three now log the unusable id and ack.
+
+This was not theoretical: it surfaced as a red test in **stapel-chat**, whose
+harness installs this module, when a malformed `user.deleted` reached this
+module's subscriber rather than chat's.
+
+
 ## [0.3.0] — 2026-08-24
 
 ### Fixed

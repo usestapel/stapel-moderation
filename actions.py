@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import logging
 
+from django.core.exceptions import ValidationError
+
 from stapel_core.comm import on_action, subscribe_action
 
 from . import events as own_events
@@ -196,7 +198,16 @@ def handle_user_deleted(event) -> None:
     if not user_id:
         logger.error("user.deleted event without user_id: %s", event.event_id)
         return
-    ModerationGDPRProvider().delete(user_id)
+    try:
+        ModerationGDPRProvider().delete(user_id)
+    except (ValidationError, ValueError, TypeError):
+        # An id that cannot address a row here names no reporter to erase.
+        # Django raises ValidationError (not ValueError) for a malformed UUID,
+        # and an escaping exception is a poison pill: no redelivery repairs a
+        # bad id, the bus just keeps handing it back.
+        logger.error(
+            "user.deleted with unusable user_id %r: %s", user_id, event.event_id
+        )
 
 
 @on_action("staff.role.revoked")
@@ -213,9 +224,18 @@ def handle_staff_role_revoked(event) -> None:
     user_id = (event.payload or {}).get("user_id")
     if not user_id:
         return
-    for case in Case.objects.filter(
-        claimed_by=user_id, state=CaseState.CLAIMED
-    ).iterator():
+    try:
+        leased = list(
+            Case.objects.filter(claimed_by=user_id, state=CaseState.CLAIMED)
+        )
+    except (ValidationError, ValueError, TypeError):
+        # A malformed id leases nothing here; raising would loop the event.
+        logger.error(
+            "staff.role.revoked with unusable user_id %r: %s",
+            user_id, event.event_id,
+        )
+        return
+    for case in leased:
         try:
             services.release_case(case)
         except services.ModerationError:
@@ -231,7 +251,10 @@ def handle_own_verdict(event) -> None:
     from .models import Case
     from .notifications import notify_content_blocked
 
-    case = Case.objects.filter(pk=(event.payload or {}).get("case_id")).first()
+    try:
+        case = Case.objects.filter(pk=(event.payload or {}).get("case_id")).first()
+    except (ValidationError, ValueError, TypeError):
+        case = None
     if case is None:
         return
     notify_content_blocked(case, event.payload or {})
