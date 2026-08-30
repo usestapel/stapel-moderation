@@ -4,6 +4,60 @@ All notable changes to stapel-moderation are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Pre-1.0 semver: **minor = breaking**, patch = compatible.
 
+## [0.4.0] — 2026-08-30
+
+### Added — `user.merged`: a sanction follows the person
+
+This module knew one thing about an account's end: erase the complainant.
+When a visitor signs in with an authenticator an existing account already
+holds, stapel-auth folds the guest into the survivor and emits `user.merged`
+— the opposite instruction, and nothing here answered it. Every user-keyed
+column kept naming an id that can no longer sign in: the reports, the audit
+trail, the appeals, **and the sanctions**. A banned guest could shed the ban
+by signing in, and the progressive ladder's memory would reset with it. That
+is not a data-loss bug, it is a one-click ban-evasion route, and it has no
+symptom at the seam — nothing raises, nothing retries, nothing is logged.
+
+- **`user.merged` is subscribed in `stapel_moderation.actions`** and
+  re-parents every column this module keys by a user, in one transaction:
+  `Case.subject_user_id` and `claimed_by`, `Report.reporter_id`,
+  `Verdict.actor_id`, `CaseEvent.actor_id`, `Sanction.subject_user_id`,
+  `issued_by` and `lifted_by`, `Appeal.appellant_id` and `resolved_by`.
+- **Each carried active sanction is re-announced** with
+  `moderation.sanction.issued` inside the same transaction. The rows moved
+  with a bulk `UPDATE`, which announces nothing, and the
+  `moderation.user_sanctions` read-model keys on `subject_user_id` — so
+  without the announcement a split topology would keep answering `allowed`
+  for a user it now holds a ban on. `updated_at` is advanced in the same
+  update so the projection's `seq` ordering token moves forward and the
+  announcement is not discarded as stale. `UserSanctionState` is never
+  rewritten by hand: it is the projection's row, owned by the projection
+  runner, and hand-editing a read-model is how the two halves drift.
+- **Both uniqueness constraints resolve rather than raise.** A blind
+  re-point would be an `IntegrityError`, and on this bus an escaping
+  exception is a payload redelivered forever. `uniq_report_per_user` and
+  `uniq_appeal_per_case_user` both mean "one person, one row", and after a
+  merge the two accounts ARE one person: the guest's duplicate report is
+  dropped with `Case.report_count` decremented so the count stays truthful,
+  and the guest's duplicate appeal is dropped. Both are logged, loudly.
+- **No `MergeTargetNotReady` here, and there cannot be one.** Every actor in
+  this module is a bare `UUIDField`, never an FK to `AUTH_USER_MODEL`
+  (models.py house rules), precisely so a moderation record survives the
+  account it is about — so nothing has to exist locally before the
+  survivor's id can be written, and the transfer lands on the first
+  delivery. The FK-carrying modules in this fleet need the retry signal;
+  this one does not, and saying so is the point.
+- A malformed or missing id is logged and ACKed, `ValidationError` included
+  (see 0.3.1). `schemas/consumes/user.merged.json` carries the contract and
+  `tests/test_user_merged.py` pins every column moving, the sanction
+  following the person, the announcement and its ordering token, both
+  collisions, a redelivery changing and announcing nothing, every malformed
+  shape ACKing, and `stapel_core.lifecycle.E001` returning `[]`.
+
+**Minor, not patch**: a new consumed action is public surface. Requires no
+new stapel-core API; the E001 check that names the gap ships in stapel-core
+0.52.1.
+
 ## [0.3.1] — 2026-08-30
 
 ### Fixed — a malformed id in an action payload was a poison pill

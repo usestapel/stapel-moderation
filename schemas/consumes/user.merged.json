@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "user.merged",
+  "description": "A guest account was folded into an existing one on sign-in (stapel-auth 0.30.0): from_user_id ceased to exist and its rows belong to into_user_id. The other half of the account life cycle user.deleted answers, and the opposite instruction — moderation history is re-parented, not erased: Case.subject_user_id/claimed_by, Report.reporter_id, Verdict.actor_id, CaseEvent.actor_id, Sanction.subject_user_id/issued_by/lifted_by, Appeal.appellant_id/resolved_by. A sanction follows the person, or a merge would be a one-click ban-evasion route; carried sanctions are re-announced with moderation.sanction.issued so the user_sanctions read-model recomputes. Idempotent.",
+  "type": "object",
+  "required": [
+    "from_user_id",
+    "into_user_id"
+  ],
+  "properties": {
+    "from_user_id": {
+      "type": "string"
+    },
+    "into_user_id": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}

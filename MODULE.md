@@ -183,9 +183,27 @@ code here.
 
 **Consumes** (`schemas/consumes/`): each registered type's `intake_events`,
 `task.failed` (filtered to `moderation.screen`), `moderation.applied`
-(optional ack — nobody emits one today), `user.deleted`,
+(optional ack — nobody emits one today), `user.deleted`, `user.merged`,
 `staff.role.revoked`, plus this module's own facts driving the notification
 subscribers.
+
+`user.deleted` and `user.merged` are the two halves of one account life cycle
+and say opposite things. Erasure detaches the complainant from their complaint;
+a merge re-parents every user-keyed column onto the account that absorbed the
+guest — `Case.subject_user_id`/`claimed_by`, `Report.reporter_id`,
+`Verdict.actor_id`, `CaseEvent.actor_id`,
+`Sanction.subject_user_id`/`issued_by`/`lifted_by`,
+`Appeal.appellant_id`/`resolved_by`. **A sanction follows the person**, or a
+merge would be a one-click ban-evasion route; each carried active sanction is
+re-announced with `moderation.sanction.issued` (and its `updated_at` advanced,
+so the projection's `seq` token moves) because the `moderation.user_sanctions`
+read-model keys on `subject_user_id` and a bulk `UPDATE` announces nothing.
+`UserSanctionState` itself is never rewritten by hand — it is the projection's
+row, owned by the projection runner. The two uniqueness constraints resolve to
+"one person, one row": a duplicate report is dropped (with `Case.report_count`
+decremented) and so is a duplicate appeal. No `MergeTargetNotReady` exists here
+and none can: every actor is a bare `UUIDField`, never an FK, so nothing has to
+exist locally before the survivor's id can be written. Idempotent.
 
 **Provides** (`schemas/functions/`): `moderation.submit`,
 `moderation.check_sanctions`, `moderation.sanctions_by_users`,
