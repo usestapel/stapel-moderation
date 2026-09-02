@@ -34,7 +34,8 @@
         "report",
         "manual",
         "rescan",
-        "appeal"
+        "appeal",
+        "draft"
       ]
     },
     "severity": {

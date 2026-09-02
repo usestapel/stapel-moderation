@@ -78,7 +78,11 @@ claim that every key is settable from a shell:
 |-----|--------|---------|----------|---------|
 | MEDIA_SCREEN_TIER | env | Largest CDN variant width handed to the model. | no | `1024` |
 | MAX_MEDIA_PER_CASE | env | Image prompts disable the provider's prompt cache, so every media screen is paid in full — this is the price control. | no | `4` |
-| MEDIA_TRANSPORT | env | `url` (the model vendor fetches it — needs publicly reachable CDN URLs) or `data_b64` (inlined, bounded by the broker's max payload). | no | `url` |
+| MEDIA_TRANSPORT | env | `url` (the model vendor fetches it — needs a URL reachable from OUTSIDE the fleet) or `data_b64` (this process fetches the bytes and inlines them — the transport that works behind a proxy). Read for real since 0.5.0; before that it was declared and ignored. | no | `url` |
+| MEDIA_BASE_URL | env | Absolute origin a RELATIVE `cdn.describe` variant URL is resolved against (`https://cdn.example.com`). Empty and a relative URL means the image is **skipped and logged**, never handed to a provider that answers `invalid_image_url` — `moderation.W007` names it at boot. | no | `""` |
+| MEDIA_FETCH_MAX_BYTES | env | Ceiling on one `data_b64` fetch, measured on the bytes actually read. Over it the image is skipped, never truncated. | no | `5000000` |
+| MEDIA_FETCH_TIMEOUT_SECONDS | env | Timeout of one `data_b64` fetch: a hanging CDN must not hold a screening Task open to its deadline. | no | `10` |
+| MAX_INLINE_IMAGE_BYTES | env | Ceiling on the TOTAL decoded bytes of the inline `images` one `screen_draft` call may carry (a draft holds photo bytes no CDN has a ref for yet). Over it — or over `MAX_MEDIA_PER_CASE` entries — the call is **refused**, never trimmed. | no | `8000000` |
 
 ### Complaint intake (source: env)
 

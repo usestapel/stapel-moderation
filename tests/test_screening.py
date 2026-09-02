@@ -372,3 +372,258 @@ def test_redelivered_screen_task_is_a_no_op(content_double, llm_double):
 
     assert screen_case({"case_id": str(case.id)}) == {"skipped": CaseState.RESOLVED}
     assert len(llm_double["calls"]) == 1
+
+
+# ── Media transport: the screener has to hand over a fetchable image ──
+
+
+class _FakeResponse:
+    """The bounded-read shape :func:`urllib.request.urlopen` answers with."""
+
+    def __init__(self, body: bytes, content_type: str = "image/webp"):
+        self._body = body
+        self.headers = {"Content-Type": content_type}
+
+    def read(self, size=-1):
+        if size is None or size < 0:
+            body, self._body = self._body, b""
+            return body
+        body, self._body = self._body[:size], self._body[size:]
+        return body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+@pytest.fixture
+def http_double(monkeypatch):
+    """Stand in for the outbound fetch of one CDN variant's bytes."""
+    import urllib.request
+
+    state = {
+        "calls": [],
+        "body": b"RIFF-webp-bytes",
+        "content_type": "image/webp",
+        "error": None,
+    }
+
+    def _urlopen(request, timeout=None):
+        state["calls"].append(
+            {"url": getattr(request, "full_url", request), "timeout": timeout}
+        )
+        if state["error"] is not None:
+            raise state["error"]
+        return _FakeResponse(state["body"], state["content_type"])
+
+    monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
+    return state
+
+
+def _media_content():
+    return services.TargetContent(
+        text="Barely used, good condition.", media=("product/802d669",)
+    )
+
+
+def test_a_relative_variant_url_is_absolutized_against_the_base(
+    content_double, cdn_double, settings
+):
+    """The live defect: a bare CDN path is not an image a vendor can fetch.
+
+    ``cdn.describe`` answers ``/media/cdn/...`` by design; a provider handed
+    that path replies 400 invalid_image_url, the screening is retried to
+    exhaustion and the case parks on a policy_default verdict. Every listing
+    with a real photo on one live stand failed exactly this way, and the
+    listings that "passed" were the ones whose media ref did not resolve at
+    all — so the screener had never once seen a photo.
+    """
+    from stapel_moderation.screening import _media_images
+
+    settings.STAPEL_MODERATION = {"MEDIA_BASE_URL": "https://cdn.example.test"}
+
+    images = _media_images(_media_content())
+
+    assert images == [
+        {"url": "https://cdn.example.test/media/cdn/product/802d669/1080w.webp"}
+    ]
+
+
+def test_a_relative_variant_url_without_a_base_is_skipped(
+    content_double, cdn_double, caplog
+):
+    """No base URL configured: skip the image and SAY so.
+
+    Skipping matches the posture already stated one line above in the same
+    function — an unresolvable media ref is not a reason to abandon the text
+    next to it — and it is the only honest option, because the alternative is
+    handing a provider a path it will answer 400 to on all three attempts.
+    """
+    import logging
+
+    from stapel_moderation.screening import _media_images
+
+    with caplog.at_level(logging.WARNING, logger="stapel_moderation.screening"):
+        images = _media_images(_media_content())
+
+    assert images == []
+    assert "MEDIA_BASE_URL" in caplog.text
+
+
+def test_an_absolute_variant_url_is_passed_through(content_double, cdn_double, settings):
+    """A CDN that already answers absolute URLs needs no base at all."""
+    from stapel_moderation.screening import _media_images
+
+    cdn_double["snapshots"]["product/802d669"]["variants"] = [
+        {
+            "url": "https://cdn.example.test/media/cdn/product/802d669/1080w.webp",
+            "tier": 1080,
+            "width": 447,
+            "mime": "image/webp",
+        }
+    ]
+
+    images = _media_images(_media_content())
+
+    assert images == [
+        {"url": "https://cdn.example.test/media/cdn/product/802d669/1080w.webp"}
+    ]
+
+
+def test_data_b64_transport_inlines_the_bytes(
+    content_double, cdn_double, http_double, settings
+):
+    """``MEDIA_TRANSPORT="data_b64"`` was a declared setting nobody read.
+
+    It is the transport that works when the provider cannot reach the fleet
+    inbound at all — the general case behind a proxy — so it inlines the
+    variant's bytes and hands over no URL whatsoever.
+    """
+    import base64
+
+    from stapel_moderation.screening import _media_images
+
+    settings.STAPEL_MODERATION = {
+        "MEDIA_TRANSPORT": "data_b64",
+        "MEDIA_BASE_URL": "https://cdn.internal.test",
+    }
+
+    images = _media_images(_media_content())
+
+    assert images == [
+        {
+            "data_b64": base64.b64encode(http_double["body"]).decode("ascii"),
+            "mime": "image/webp",
+        }
+    ]
+    assert "url" not in images[0]
+    assert http_double["calls"][0]["url"] == (
+        "https://cdn.internal.test/media/cdn/product/802d669/1080w.webp"
+    )
+
+
+def test_the_inline_fetch_honours_the_size_cap(
+    content_double, cdn_double, http_double, settings
+):
+    """An image over the cap is skipped, never truncated: half a JPEG is not
+    a picture, and a broker refusing an oversized payload is worse."""
+    from stapel_moderation.screening import _media_images
+
+    settings.STAPEL_MODERATION = {
+        "MEDIA_TRANSPORT": "data_b64",
+        "MEDIA_BASE_URL": "https://cdn.internal.test",
+        "MEDIA_FETCH_MAX_BYTES": 8,
+    }
+    http_double["body"] = b"x" * 64
+
+    assert _media_images(_media_content()) == []
+
+
+def test_the_inline_fetch_honours_the_timeout(
+    content_double, cdn_double, http_double, settings
+):
+    """The fetch is bounded in time as well as in size: a CDN that hangs must
+    not hold a screening Task open until its deadline."""
+    from stapel_moderation.screening import _media_images
+
+    settings.STAPEL_MODERATION = {
+        "MEDIA_TRANSPORT": "data_b64",
+        "MEDIA_BASE_URL": "https://cdn.internal.test",
+        "MEDIA_FETCH_TIMEOUT_SECONDS": 3,
+    }
+
+    _media_images(_media_content())
+
+    assert http_double["calls"][0]["timeout"] == 3.0
+
+
+def test_a_fetch_failure_skips_the_image_and_keeps_the_text(
+    content_double, cdn_double, http_double, settings
+):
+    from urllib.error import URLError
+
+    from stapel_moderation.screening import _media_images
+
+    settings.STAPEL_MODERATION = {
+        "MEDIA_TRANSPORT": "data_b64",
+        "MEDIA_BASE_URL": "https://cdn.internal.test",
+    }
+    http_double["error"] = URLError("connection refused")
+
+    assert _media_images(_media_content()) == []
+
+
+def test_the_screening_call_carries_the_absolutized_image(
+    content_double, cdn_double, llm_double, settings
+):
+    """End to end through ``run_llm``: what reaches the provider is fetchable."""
+    from stapel_core.comm import mutate_and_emit
+
+    settings.STAPEL_MODERATION = {"MEDIA_BASE_URL": "https://cdn.example.test"}
+    content_double["media"] = ["product/802d669"]
+
+    case = _open_case()
+    with mutate_and_emit() as emit_event:
+        services.start_screening(case, emit_event=emit_event)
+
+    payload = llm_double["calls"][0]
+    assert payload["images"] == [
+        {"url": "https://cdn.example.test/media/cdn/product/802d669/1080w.webp"}
+    ]
+
+
+def test_media_transport_url_without_a_base_is_a_startup_warning(
+    content_double, settings
+):
+    """W007: the exact live misconfiguration, made visible at boot.
+
+    A target type screens media, the transport is "url", and there is no
+    origin to resolve a relative CDN path against — so every photo is
+    silently dropped from every screening and nothing anywhere says so.
+    """
+    from django.core.checks import run_checks
+
+    assert "stapel_moderation.W007" in {getattr(m, "id", "") for m in run_checks()}
+
+    settings.STAPEL_MODERATION = {"MEDIA_BASE_URL": "https://cdn.example.test"}
+    assert "stapel_moderation.W007" not in {getattr(m, "id", "") for m in run_checks()}
+
+
+def test_no_media_warning_when_the_type_does_not_screen_media(settings):
+    """A text-only target type is not misconfigured for lacking a CDN origin."""
+    from django.core.checks import run_checks
+
+    from stapel_moderation.registry import register_target_type
+
+    register_target_type(
+        "review",
+        {
+            "id_field": "review_id",
+            "content_function": "reviews.moderation_content",
+            "media": False,
+        },
+    )
+
+    assert "stapel_moderation.W007" not in {getattr(m, "id", "") for m in run_checks()}

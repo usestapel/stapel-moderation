@@ -58,6 +58,49 @@ def submit_function(payload: dict) -> dict:
     return {"case_id": str(case.id), "state": case.state, "created": created}
 
 
+@function("moderation.screen_draft", schema=_schema("moderation.screen_draft"))
+def screen_draft_function(payload: dict) -> dict:
+    """May this draft be published? — the synchronous, appealable entrance.
+
+    The one Function whose payload carries CONTENT rather than an id, and it
+    has to: a draft is not a target, nothing stores it, and there is nothing
+    for a ``content_function`` to answer about. The composer holds the only
+    copy, so the composer sends it.
+
+    Photos arrive by either of two doors, because a draft and a published
+    listing hold different things: ``media`` is a list of CDN refs (resolved
+    through ``cdn.describe``, the same path the asynchronous screening takes),
+    ``images`` is a list of ``{"data_b64", "mime"}`` entries that go straight
+    to the model. A draft has bytes and no ref; a published listing has a ref
+    and no bytes. Both must be screened.
+
+    A refusal comes back with a ``case_id`` and an ``appeal_url`` — the
+    refusal is a real decision on a real case, not a boolean somebody's UI
+    invented — while an approval persists nothing at all. See
+    :func:`stapel_moderation.services.screen_draft` for why that asymmetry is
+    the design rather than an optimization.
+    """
+    from . import services
+
+    author_id = str(payload.get("author_id") or "")
+    subject_user_id = str(payload.get("subject_user_id") or "") or author_id
+    content = services.TargetContent(
+        title=str(payload.get("title") or ""),
+        text=str(payload.get("text") or ""),
+        language=str(payload.get("language") or ""),
+        media=tuple(payload.get("media") or ()),
+        author_id=author_id,
+    )
+    result = services.screen_draft(
+        target_type=payload["target_type"],
+        content=content,
+        subject_user_id=subject_user_id or None,
+        reports=tuple(payload.get("reports") or ()),
+        images=tuple(payload.get("images") or ()),
+    )
+    return result.as_dict()
+
+
 @function("moderation.check_sanctions", schema=_schema("moderation.check_sanctions"))
 def check_sanctions_function(payload: dict) -> dict:
     """Is this user under an active sanction?
@@ -168,6 +211,7 @@ __all__ = [
     "check_sanctions_function",
     "policy_disclosure_function",
     "sanctions_by_users_function",
+    "screen_draft_function",
     "sanctions_export_function",
     "submit_function",
 ]

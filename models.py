@@ -121,6 +121,14 @@ class CaseOrigin(models.TextChoices):
     MANUAL = "manual", "Opened by a moderator"
     RESCAN = "rescan", "Re-screen of an earlier decision"
     APPEAL = "appeal", "Reopened by an appeal"
+    #: A draft that was refused at the composer, before anything was
+    #: published. The case exists ONLY because a refusal has to be
+    #: appealable; an approved draft is never written down (see
+    #: ``services.screen_draft``). ``target_key`` names no live target — it
+    #: is a synthetic ``draft:<uuid>`` — so a case of this origin is the one
+    #: kind whose content cannot be re-read from its owner, which is why the
+    #: verdict's evidence excerpt is the record of what was judged.
+    DRAFT = "draft", "Refused at the draft step"
 
 
 class CaseEventKind(models.TextChoices):

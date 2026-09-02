@@ -4,6 +4,116 @@ All notable changes to stapel-moderation are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Pre-1.0 semver: **minor = breaking**, patch = compatible.
 
+## [0.5.0] — 2026-09-03
+
+### Fixed — image screening had never once looked at an image
+
+`screening._media_images` resolved a media ref through `cdn.describe`, picked
+a variant and forwarded `{"url": best["url"]}` verbatim. `cdn.describe`
+answers **relative** variant URLs by design — it is host-agnostic and leaves
+the origin to whoever renders the page — so what reached `llm.complete` was
+`{"url": "/media/cdn/<ref>/1080w.webp"}`: a path with no scheme and no host.
+The provider answered `400 invalid_image_url`, `run_llm` correctly raised
+`ScreeningUnavailable`, the ladder retried 3/3, and the case parked on a
+`policy_default / screening_unavailable` verdict.
+
+On a live stand every case carrying a real photo failed exactly that way,
+three attempts out of three. The cases that "succeeded" were the ones whose
+media ref was dangling — `cdn.describe` could not resolve it, `_media_images`
+returned `[]`, and only the TEXT was screened. Net effect: **the screener had
+never once been shown a photo**, and nothing at runtime said so. A queue full
+of screened-looking verdicts is exactly what a queue looks like when the
+images are silently dropped.
+
+`MEDIA_TRANSPORT` was supposed to be the control for this and was **never
+read**: a declared setting with no implementation, which is a switch that
+proves nothing. Both of its branches are now implemented.
+
+- **`MEDIA_BASE_URL`** (new, default `""`) — the absolute origin a relative
+  variant URL is resolved against. Under `MEDIA_TRANSPORT="url"` a relative
+  URL is absolutized against it; with the setting empty that image is
+  **SKIPPED with a log line** rather than handed to a provider that cannot
+  fetch it. Skipping is the posture the surrounding code already took for an
+  unresolvable ref — one photo nobody could resolve is not a reason to
+  abandon the text next to it.
+- **`MEDIA_TRANSPORT="data_b64"`** now fetches the chosen variant's bytes and
+  hands `llm.complete` `{"data_b64": ..., "mime": ...}` and no URL at all.
+  This is the transport that works when the provider cannot reach the fleet
+  inbound — behind a proxy or on a private network, the ordinary case rather
+  than the exotic one. Bounded by two new settings rather than by constants:
+  **`MEDIA_FETCH_MAX_BYTES`** (default `5000000`, measured on the bytes
+  actually read, because a `Content-Length` is a claim by the other end; over
+  it the image is skipped, never truncated) and
+  **`MEDIA_FETCH_TIMEOUT_SECONDS`** (default `10` — a hanging CDN must not
+  hold a screening Task open to its deadline).
+- **`moderation.W007`** fires at boot on the exact misconfiguration above:
+  `MEDIA_TRANSPORT="url"`, no `MEDIA_BASE_URL`, and a target type that screens
+  media. `moderation.E008` refuses a transport word that does not exist.
+
+### Added — `screen_draft`: a refusal is possible before publication
+
+Until now the only entrance was asynchronous — `moderation.submit` →
+`start_screening` → a comm-Task whose verdict lands later. That is right for
+content that is already live and wrong for the moment somebody presses
+Publish: an obviously non-compliant photo went out and was moderated
+afterwards, and its author learned the rules from a takedown letter.
+
+- **`services.screen_draft(*, target_type, content, subject_user_id,
+  reports=()) -> DraftScreeningResult`** runs the configured screener inline
+  on a `TargetContent` the caller supplies. No persisted target is needed,
+  because the draft does not exist yet.
+- **A refusal is appealable, which is the hard requirement.** When the verdict
+  is not `approved`, a real `Case` (new origin `draft`) is persisted and the
+  verdict recorded through the existing `resolve_case`, so `open_appeal`
+  accepts it unchanged and the answer carries `case_id` plus the `appeal_url`
+  built from `APPEAL_URL_TEMPLATE`. DSA Art. 17 has no "it was only a draft"
+  exemption, and an inline refusal nobody can contest is the silent moderation
+  this module exists to abolish. The verdict's stored evidence excerpt is the
+  record of what was judged — a draft case is the one kind whose content
+  cannot be re-read from its owner later.
+- **An approval persists NOTHING**, and the asymmetry is the design: every
+  cleared draft becoming a queue row is a queue nobody can work, which is the
+  same as having no queue, arrived at politely.
+- **Unavailability is never permission.** A screener that raised, and a
+  deployment with the automatic stage off, both come out through
+  `ON_SCREENING_FAILURE` / `ON_SCREENING_UNAVAILABLE`; under the shipped
+  `"hold"` the answer is `allowed=False` with `screening_unavailable`, and it
+  is the caller's decision what to do about it. Nothing returns
+  `allowed=True` because a model failed to answer.
+- **`moderation.screen_draft`** wraps it on the bus, with its schema in
+  `schemas/functions/`. Its payload carries the content fields directly
+  (`title`, `text`, `language`, `media`, `images`, `author_id`) since there is
+  no stored target to fetch; the response is `{allowed, decision, reason_code,
+  rationale, confidence, source, case_id, appeal_url}`.
+- **Photos reach a draft screening by either of two doors**, because a draft
+  and a published listing hold different things. `media` is a list of CDN refs
+  resolved through `cdn.describe` — what a *published* listing has. `images`
+  is a list of `{"data_b64", "mime"}` entries handed to the model as they are,
+  with no `cdn.describe`, no `MEDIA_BASE_URL` and no fetch — what a *draft*
+  has, because at draft time the composer holds raw bytes and no upload has
+  settled into a ref. Waiting for a ref would mean the composer cannot be
+  answered; screening the text alone would mean answering "publishable" about
+  a photo nobody looked at. Bounded by `MAX_MEDIA_PER_CASE` (count) and the
+  new **`MAX_INLINE_IMAGE_BYTES`** (total decoded, default `8000000`), and
+  over either bound the call is REFUSED with `services.InvalidDraftImage`
+  rather than trimmed — as it is for a mime that is not `image/*` or bytes
+  that are not base64. Refusing is the point: this module skips an
+  unresolvable CDN ref because the text beside it is still worth judging, but
+  bytes the caller HANDED us and is waiting on cannot be dropped into an
+  `allowed=True`.
+- **`resolve_case(..., emit_verdict_event=False)`** is new and has exactly one
+  caller: a draft case's `target_key` names no listing, no review and no row
+  anywhere, and the verdict topic is an INSTRUCTION to a target module — an
+  announcement about a key nobody owns is a permanent "unknown target" in a
+  sibling service at best. Every other caller leaves it alone.
+- Migration `0003_case_origin_draft` adds the `draft` choice. Choices only —
+  no column change, no data rewrite.
+
+**Minor, not patch**: image screening starts actually working (a deployment
+that "screened" photos never did, and now will — including the bill for it),
+a new public entry point and a new comm Function appear, and a new case origin
+enters the audit vocabulary.
+
 ## [0.4.0] — 2026-08-30
 
 ### Added — `user.merged`: a sanction follows the person

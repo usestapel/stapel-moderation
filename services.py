@@ -152,6 +152,21 @@ class SameActor(ModerationError):
     """The moderator who decided may not decide the appeal."""
 
 
+class InvalidDraftImage(ModerationError):
+    """An inline draft image this module refuses to screen around.
+
+    Raised, never swallowed, and that is the whole design of it. Every other
+    unusable image in this module is SKIPPED — an unresolvable CDN ref is not
+    a reason to abandon the text next to it, because the text is still worth
+    judging and the image was never the caller's to hand over. Inline bytes
+    are the opposite situation: the caller HAS the photo, sent it, and is
+    waiting to be told whether it may publish it. Dropping one and answering
+    ``allowed=True`` would be a verdict about content nobody screened —
+    precisely the failure 0.5.0 exists to close, re-entering through the door
+    that was built to close it.
+    """
+
+
 # ── Content ──────────────────────────────────────────────────────────
 
 
@@ -667,6 +682,7 @@ def resolve_case(
     model: str = "",
     usage: Optional[dict] = None,
     emit_event=None,
+    emit_verdict_event: bool = True,
 ) -> Verdict:
     """Close a case with a verdict, and act on the target by announcing it.
 
@@ -684,6 +700,16 @@ def resolve_case(
     Notifications are NOT requested here. They are a subscriber on this
     module's own facts (the forms canon): the verdict commits before anyone is
     told, and a notification outage can never roll back a moderation decision.
+
+    ``emit_verdict_event=False`` suppresses step 4 alone, and exists for
+    exactly one caller: :func:`screen_draft`, whose case is about content that
+    was never published and whose ``target_key`` therefore names no listing,
+    no review and no row anywhere. The topic is an INSTRUCTION to a target
+    module ("apply this to that key"), so announcing one about a key nobody
+    owns is at best a permanent "unknown target" log line in a sibling
+    service and at worst a payload it redelivers forever. Every other caller
+    leaves it alone: a verdict that does not act on its target is the defect
+    this argument must never be used to introduce.
     """
     if decision not in VerdictDecision.values:
         raise InvalidDecision(decision)
@@ -735,7 +761,7 @@ def resolve_case(
                 emit_event=emit_event,
             )
 
-        verdict_topic = policy["verdict_event"]
+        verdict_topic = policy["verdict_event"] if emit_verdict_event else None
         if verdict_topic:
             events.emit_moderation_completed(  # emit-check: ok — inside the _emitting() block opened at the top of resolve_case
                 case, verdict, topic=verdict_topic, emit_event=emit_event
@@ -751,6 +777,288 @@ def resolve_case(
                     str(report_id), case, decision, emit_event=emit_event
                 )
     return verdict
+
+
+# ── Draft screening (synchronous, appealable) ────────────────────────
+
+
+#: The synthetic ``target_key`` of a draft case. A draft has no target — the
+#: whole point is that it does not exist yet — so the key is a fresh opaque
+#: string rather than a borrowed id, and it can never collide with a live
+#: target's key or with another draft's.
+DRAFT_KEY_PREFIX = "draft:"
+
+
+@dataclass(frozen=True)
+class DraftScreeningResult:
+    """The answer to "may this be published?", asked before it is published.
+
+    ``allowed`` is the only field a composer must act on; the rest is what
+    makes the refusal explainable to the person who wrote the draft, and
+    ``case_id``/``appeal_url`` are what make it contestable.
+    """
+
+    allowed: bool
+    decision: str
+    reason_code: str = ""
+    rationale: str = ""
+    confidence: Optional[float] = None
+    source: str = ""
+    case_id: Optional[str] = None
+    appeal_url: str = ""
+
+    def as_dict(self) -> dict:
+        return {
+            "allowed": self.allowed,
+            "decision": self.decision,
+            "reason_code": self.reason_code,
+            "rationale": self.rationale,
+            "confidence": self.confidence,
+            "source": self.source,
+            "case_id": self.case_id,
+            "appeal_url": self.appeal_url,
+        }
+
+
+def _draft_fallback(policy_value: str, *, reason_code: str):
+    """Turn ``hold``/``approve``/``reject`` into a draft screening result.
+
+    The same three-word vocabulary the asynchronous path applies in
+    ``tasks.apply_screening_failure``, read from the same settings, because a
+    deployment's answer to "the screener could not answer" must not depend on
+    which door the content came through.
+    """
+    from .screening import ScreeningResult
+
+    value = (policy_value or "hold").lower()
+    if value == "approve":
+        decision = VerdictDecision.APPROVED
+    elif value == "reject":
+        decision = VerdictDecision.REJECTED
+    else:
+        decision = VerdictDecision.NEEDS_REVIEW
+    return ScreeningResult(
+        decision=decision,
+        source=VerdictSource.POLICY_DEFAULT,
+        reason_code=reason_code,
+        rationale="Automatic screening was unavailable.",
+    )
+
+
+def _normalize_inline_images(images) -> tuple:
+    """Validate the inline images of one draft, or refuse the whole call.
+
+    Four refusals, all :class:`InvalidDraftImage`: an entry that is not
+    ``{"data_b64", "mime"}``, a mime that is not ``image/*``, bytes that are
+    not base64, more images than ``MAX_MEDIA_PER_CASE``, and more decoded
+    bytes in total than ``MAX_INLINE_IMAGE_BYTES``.
+
+    Every one of them refuses rather than trims. Screening four of ten photos
+    and answering about all ten is the same lie as screening none of them, and
+    it is a quieter one.
+    """
+    import base64
+    import binascii
+
+    from .conf import moderation_settings
+
+    entries = list(images or ())
+    if not entries:
+        return ()
+    max_count = int(moderation_settings.MAX_MEDIA_PER_CASE)
+    if len(entries) > max_count:
+        raise InvalidDraftImage(
+            f"{len(entries)} inline images exceeds MAX_MEDIA_PER_CASE={max_count}; "
+            f"send fewer rather than having some of them silently unscreened"
+        )
+    max_bytes = int(moderation_settings.MAX_INLINE_IMAGE_BYTES)
+    total = 0
+    normalized = []
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            raise InvalidDraftImage(f"image {index} is not an object")
+        mime = str(entry.get("mime") or "").strip().lower()
+        data_b64 = entry.get("data_b64")
+        if not mime.startswith("image/"):
+            raise InvalidDraftImage(f"image {index} declares mime {mime!r}, not image/*")
+        if not isinstance(data_b64, str) or not data_b64:
+            raise InvalidDraftImage(f"image {index} carries no data_b64")
+        try:
+            raw = base64.b64decode(data_b64, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise InvalidDraftImage(f"image {index} is not valid base64") from exc
+        if not raw:
+            raise InvalidDraftImage(f"image {index} decodes to no bytes")
+        total += len(raw)
+        if total > max_bytes:
+            raise InvalidDraftImage(
+                f"inline images total {total} decoded bytes, over "
+                f"MAX_INLINE_IMAGE_BYTES={max_bytes}"
+            )
+        normalized.append({"data_b64": data_b64, "mime": mime})
+    return tuple(normalized)
+
+
+def screen_draft(
+    *,
+    target_type: str,
+    content: TargetContent,
+    subject_user_id=None,
+    reports=(),
+    images=(),
+) -> DraftScreeningResult:
+    """Screen a draft INLINE and answer whether it may be published.
+
+    Every other entrance to this module is asynchronous, and rightly so: a
+    live listing is moderated after the fact, because the alternative is a
+    publish button that waits on a model. A draft is the opposite situation —
+    nothing is public yet, the author is still sitting in the composer, and a
+    refusal delivered there is a refusal the author can fix in place instead
+    of learning about from a takedown letter an hour later. There was no way
+    to ask that question, so obviously non-compliant photos went out and were
+    moderated afterwards.
+
+    No target is fetched and none has to exist: the caller passes the
+    :class:`TargetContent` it is holding. ``target_type`` still resolves
+    strictly through the registry, because the policy is what decides the
+    rules, the reason vocabulary, whether media is screened at all and — when
+    the draft is refused — the severity floor of the case that records it.
+
+    **Two doors for photos, because a draft and a listing hold different
+    things.** ``content.media`` is a list of CDN refs, resolved through
+    ``cdn.describe`` exactly as the asynchronous path resolves them — that is
+    what a *published* listing has. ``images`` is a list of
+    ``{"data_b64", "mime"}`` entries that go to the model as they are, with no
+    ``cdn.describe``, no ``MEDIA_BASE_URL`` and no fetch — that is what a
+    *draft* has, because at draft time the composer is holding raw bytes and
+    no upload has settled into a ref yet. Blocking on one would mean the
+    composer cannot be answered at all, and screening the text alone would
+    mean answering "publishable" about a photo nobody looked at. Both doors
+    stay open; the inline one is bounded by ``MAX_MEDIA_PER_CASE`` and
+    ``MAX_INLINE_IMAGE_BYTES`` and REFUSES rather than trims
+    (:class:`InvalidDraftImage`).
+
+    **The asymmetry, which is deliberate and load-bearing.**
+
+    *Not approved* → a real :class:`Case` (origin ``draft``) is persisted and
+    the verdict recorded through :func:`resolve_case`, so the refusal is a
+    decision with an audit trail, a statement of reasons and — the hard
+    requirement — an appeal: :func:`open_appeal` accepts the case unchanged,
+    because a rejected draft's case is left ``resolved`` exactly like any
+    other rejection. DSA Art. 17 does not have a "but it was only a draft"
+    exemption, and a refusal nobody can contest is precisely the silent
+    moderation this module exists to abolish. The verdict's evidence carries
+    the excerpt of what was judged, because a draft case is the one kind
+    whose content cannot be re-read from its owner later.
+
+    *Approved* → NOTHING is persisted. An approved draft that opened a case
+    would mean every keystroke-happy author fills the human queue with rows
+    holding an approval nobody needs to read, and a queue that cannot be
+    worked is a queue nobody works — which is the same failure as having no
+    queue, arrived at politely.
+
+    **Unavailability is never permission.** A screener that raised, and a
+    deployment with the automatic stage switched off, both come out through
+    ``ON_SCREENING_FAILURE`` / ``ON_SCREENING_UNAVAILABLE``. Under the shipped
+    ``"hold"`` the answer is ``allowed=False`` with reason
+    ``screening_unavailable``: the caller is told the draft could not be
+    cleared and decides what to do about it (hold the publish button, let it
+    through under its own risk, queue it for a person). What this function
+    will not do is answer ``allowed=True`` because a model failed to reply —
+    the shape of fail-open that published unscreened listings on the
+    predecessor system for half an hour after its provider went down.
+    """
+    import uuid
+
+    from .conf import moderation_settings
+    from .screening import ScreeningUnavailable, get_screener
+
+    policy = resolve_policy(target_type)
+    target_key = f"{DRAFT_KEY_PREFIX}{uuid.uuid4().hex}"
+
+    inline = _normalize_inline_images(images)
+    if inline:
+        # Carried on the content rather than on a new screener argument: the
+        # SCREENER seam is a published contract, (case, content, *, reports),
+        # and a host's own classifier must keep working unchanged while still
+        # being able to see the bytes.
+        content = replace(
+            content, extra={**(content.extra or {}), "inline_images": inline}
+        )
+
+    # An UNSAVED case: the screener's contract is (case, content, *, reports)
+    # and all it reads is the target type, while persisting anything before
+    # the verdict is known is exactly what the approved branch must not do.
+    probe = Case(
+        target_type=target_type,
+        target_key=target_key,
+        origin=CaseOrigin.DRAFT,
+        state=CaseState.OPEN,
+        severity=int(policy["severity_floor"]),
+        subject_user_id=subject_user_id,
+    )
+
+    if not policy["screen"] or not moderation_settings.SCREEN_ENABLED:
+        result = _draft_fallback(
+            moderation_settings.ON_SCREENING_UNAVAILABLE,
+            reason_code=REASON_SCREENING_UNAVAILABLE,
+        )
+    else:
+        try:
+            result = get_screener()(probe, content, reports=tuple(reports))
+        except ScreeningUnavailable as exc:
+            logger.warning("moderation: draft screening unavailable: %s", exc)
+            result = _draft_fallback(
+                moderation_settings.ON_SCREENING_FAILURE,
+                reason_code=REASON_SCREENING_UNAVAILABLE,
+            )
+
+    if result.decision == VerdictDecision.APPROVED:
+        return DraftScreeningResult(
+            allowed=True,
+            decision=result.decision,
+            reason_code=result.reason_code,
+            rationale=result.rationale,
+            confidence=result.confidence,
+            source=result.source,
+        )
+
+    excerpt_chars = int(moderation_settings.EVIDENCE_EXCERPT_CHARS)
+    with mutate_and_emit() as emit_event:
+        case, _created = open_case(
+            target_type,
+            target_key,
+            origin=CaseOrigin.DRAFT,
+            subject_user_id=subject_user_id,
+            emit_event=emit_event,
+        )
+        resolve_case(
+            case,
+            decision=result.decision,
+            source=result.source,
+            reason_code=result.reason_code,
+            note=result.rationale,
+            confidence=result.confidence,
+            evidence=result.evidence(content, excerpt_chars=excerpt_chars),
+            model=result.model,
+            usage=result.usage,
+            emit_event=emit_event,
+            # There is no published target to instruct — see resolve_case.
+            emit_verdict_event=False,
+        )
+
+    from .notifications import appeal_url
+
+    return DraftScreeningResult(
+        allowed=False,
+        decision=result.decision,
+        reason_code=result.reason_code,
+        rationale=result.rationale,
+        confidence=result.confidence,
+        source=result.source,
+        case_id=str(case.id),
+        appeal_url=appeal_url(case.id),
+    )
 
 
 # ── Queue operations ─────────────────────────────────────────────────
@@ -1439,6 +1747,7 @@ def policy_disclosure(*, lang: str = "", target_type: str = "") -> dict:
 
 
 __all__ = [
+    "DRAFT_KEY_PREFIX",
     "SCREEN_TASK",
     "AlreadyReported",
     "AppealNotAllowed",
@@ -1446,7 +1755,9 @@ __all__ = [
     "CaseAlreadyResolved",
     "CaseClaimedByAnother",
     "ContentUnavailable",
+    "DraftScreeningResult",
     "InvalidDecision",
+    "InvalidDraftImage",
     "InvalidSanctionKind",
     "InvalidTransition",
     "ModerationError",
@@ -1482,6 +1793,7 @@ __all__ = [
     "erase_user_reports",
     "sanction_snapshot",
     "sanctions_export",
+    "screen_draft",
     "start_screening",
     "submit_report",
     "transition",

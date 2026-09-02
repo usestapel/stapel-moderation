@@ -206,9 +206,22 @@ and none can: every actor is a bare `UUIDField`, never an FK, so nothing has to
 exist locally before the survivor's id can be written. Idempotent.
 
 **Provides** (`schemas/functions/`): `moderation.submit`,
-`moderation.check_sanctions`, `moderation.sanctions_by_users`,
-`moderation.sanctions_export`, `moderation.case_status`,
-`moderation.policy_disclosure`.
+`moderation.screen_draft`, `moderation.check_sanctions`,
+`moderation.sanctions_by_users`, `moderation.sanctions_export`,
+`moderation.case_status`, `moderation.policy_disclosure`.
+
+`moderation.screen_draft` is the one Function whose payload carries CONTENT
+rather than an id, and it has to: a draft is not a target, nothing stores it,
+and there is nothing for a `content_function` to answer about. It is the
+synchronous entrance (0.5.0) — a refusal before publication, persisted as a
+`Case` of origin `draft` so it is appealable; an approval persists nothing. Its
+photos arrive by either door: `media` (CDN refs, resolved through
+`cdn.describe`) or `images` (`{data_b64, mime}` bytes handed straight to the
+model, for a draft whose upload has not settled into a ref yet). The inline
+door refuses rather than trims — over `MAX_MEDIA_PER_CASE` or
+`MAX_INLINE_IMAGE_BYTES`, on a non-`image/*` mime, or on bytes that are not
+base64, the call raises `InvalidDraftImage` instead of quietly screening some
+of the photos and answering about all of them.
 
 **Calls**: each policy's `content_function`, `llm.complete`, `cdn.describe`,
 `request_notification`, `blacklist_user`/`unblacklist_user`. There is not one
@@ -232,9 +245,17 @@ exist locally before the survivor's id can be written. Idempotent.
   provider's prompt cache, so cost is linear in submissions. `policy["media"]`
   and `MAX_MEDIA_PER_CASE` are the controls; screening media only on
   complaint (`origin=report`) is expressible as policy.
-- **`ImageRef.url` is fetched by the model vendor**, so CDN URLs must be
-  publicly reachable. The day stapel-cdn gets auth-gated reads, switch
-  `MEDIA_TRANSPORT` to `data_b64` (bounded by the broker's max payload).
+- **A relative CDN URL is not an image a provider can fetch.** `cdn.describe`
+  answers host-agnostic paths, so `MEDIA_BASE_URL` must name the origin they
+  hang off. Under `MEDIA_TRANSPORT="url"` the vendor fetches that address and
+  it must be reachable from outside the fleet; under `"data_b64"` this process
+  fetches the bytes itself (bounded by `MEDIA_FETCH_MAX_BYTES` and
+  `MEDIA_FETCH_TIMEOUT_SECONDS`) and the origin may be internal — which is the
+  configuration for an auth-gated or non-public CDN. With no origin set, a
+  relative image is skipped and logged, and `W007` names it at boot: a
+  deployment that drops every photo from every screening is indistinguishable
+  at runtime from one that screens them, which is how one stand ran its whole
+  life without a screener ever seeing a photo.
 
 ## Known limitations (stated, not hidden)
 

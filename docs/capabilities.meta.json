@@ -154,6 +154,14 @@
         "calling llm.complete inline in a request"
       ]
     },
+    "screen_draft": {
+      "kind": "gate_function",
+      "intent": "Screen an UNPUBLISHED draft inline and answer whether it may be published — the synchronous half, for the composer that wants a refusal before anything goes out. A refusal persists a real case and comes back with an appeal address; an approval persists nothing, so the human queue never fills with cleared drafts.",
+      "instead_of": [
+        "publishing first and moderating afterwards",
+        "calling llm.complete from the composer view"
+      ]
+    },
     "queue_case": {
       "kind": "factory",
       "intent": "Send a case to the human queue and announce it. Use when a host decides a person must look, whatever the automation said."

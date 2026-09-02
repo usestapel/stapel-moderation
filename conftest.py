@@ -253,6 +253,55 @@ def content_double(author_user):
 
 
 @pytest.fixture
+def cdn_double():
+    """Register a ``cdn.describe`` double and hand back the dict it answers with.
+
+    The variant URLs are RELATIVE on purpose. ``cdn.describe`` is
+    host-agnostic by design — it answers ``/media/cdn/<ref>/<tier>.webp`` and
+    leaves the origin to whoever renders it — so a screener that forwards
+    that path verbatim hands a model vendor something it cannot fetch. The
+    double answers what the real Function answers, which is the only way a
+    test can hold that seam.
+    """
+    from stapel_core.comm import function
+
+    state = {
+        "calls": [],
+        "snapshots": {
+            "product/802d669": {
+                "ref": "product/802d669",
+                "kind": "image",
+                "mime": "image/webp",
+                "variants": [
+                    {
+                        "url": "/media/cdn/product/802d669/540w.webp",
+                        "tier": 540,
+                        "width": 224,
+                        "mime": "image/webp",
+                    },
+                    {
+                        "url": "/media/cdn/product/802d669/1080w.webp",
+                        "tier": 1080,
+                        "width": 447,
+                        "mime": "image/webp",
+                    },
+                ],
+            }
+        },
+    }
+
+    @function("cdn.describe")
+    def _describe(payload):
+        state["calls"].append(payload)
+        ref = str(payload.get("ref") or "")
+        if ref not in state["snapshots"]:
+            raise LookupError(f"cdn.describe: unknown media ref {ref!r}")
+        return dict(state["snapshots"][ref])
+
+    return state
+
+
+@pytest.fixture
 def llm_double():
     """Register an ``llm.complete`` double whose answer a test controls.
 

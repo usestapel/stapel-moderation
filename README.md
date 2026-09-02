@@ -24,11 +24,11 @@ pip install stapel-moderation
 
 | Fact | Value |
 |---|---|
-| Version | `0.4.0` |
+| Version | `0.5.0` |
 | Python | `>=3.11` (3.11, 3.12, 3.13) |
 | HTTP operations | 18 |
 | Config axes | 11 |
-| Usage surface | 59 |
+| Usage surface | 60 |
 | Extension points | 6 |
 | Error codes | 70 |
 | Fleet dependencies | [`stapel-agent`](https://github.com/usestapel/stapel-agent) (optional) · [`stapel-auth`](https://github.com/usestapel/stapel-auth) (optional) · [`stapel-cdn`](https://github.com/usestapel/stapel-cdn) (optional) · [`stapel-core`](https://github.com/usestapel/stapel-core) · [`stapel-notifications`](https://github.com/usestapel/stapel-notifications) (optional) |
@@ -127,6 +127,62 @@ listing.submitted ──▶ open_case ──▶ comm-Task "moderation.screen"
                               ▼
                  the target module blocks itself
 ```
+
+## Refusing a draft before it is published
+
+The ladder above runs *after* publication, which is right for content that is
+already live and wrong for the moment somebody presses Publish: an obviously
+non-compliant photo went out and was taken down afterwards, and its author
+learned the rules from a takedown letter.
+
+`services.screen_draft` (and the `moderation.screen_draft` comm Function) is
+the synchronous half. The payload carries the content itself — there is no
+stored target to read it from — and the answer is inline:
+
+```python
+from stapel_moderation import services
+
+result = services.screen_draft(
+    target_type="listing",
+    content=services.TargetContent(title=title, text=body),
+    subject_user_id=request.user.pk,
+    # A draft holds bytes and no ref; a published listing holds a ref and no
+    # bytes. Both doors screen: `images=` here, `content.media=` for refs.
+    images=[{"data_b64": photo_b64, "mime": "image/jpeg"}],
+)
+if not result.allowed:
+    return refuse(result.rationale, appeal_url=result.appeal_url)
+```
+
+Two properties make it a moderation decision rather than a convenience:
+
+- **a refusal is appealable.** It persists a real `Case` (origin `draft`) with
+  its `Verdict`, resolved, so the ordinary appeal flow accepts it unchanged
+  and `result.appeal_url` is a real address. A refusal nobody can contest is
+  the silent moderation this module exists to abolish;
+- **an approval persists nothing.** Every cleared draft becoming a queue row
+  is a queue nobody can work, which is the same as having no queue.
+
+A screener that could not answer never returns `allowed=True`: unavailability
+goes through the same `ON_SCREENING_FAILURE` / `ON_SCREENING_UNAVAILABLE`
+switches as the asynchronous path, and under the shipped `"hold"` the caller
+is told the draft could not be cleared.
+
+## Screening a photo, not just the text around it
+
+`cdn.describe` answers **relative** variant URLs — it is host-agnostic by
+design — so the screener has to resolve them before anything can fetch them.
+`MEDIA_BASE_URL` is that origin, and `MEDIA_TRANSPORT` decides who does the
+fetching: `"url"` hands the provider an address (which must be reachable from
+*outside*), `"data_b64"` reads the bytes here and inlines them, bounded by
+`MEDIA_FETCH_MAX_BYTES` and `MEDIA_FETCH_TIMEOUT_SECONDS` — the transport that
+works when the provider cannot reach the fleet inbound at all.
+
+With no origin configured, a relative image is **skipped and logged** rather
+than sent to a provider that will answer `invalid_image_url`, and `W007` names
+the misconfiguration at boot. It has to be named: a deployment that screens
+every photo out of every screening looks, at runtime, exactly like one that
+screens them.
 
 ## The switches that ship closed
 

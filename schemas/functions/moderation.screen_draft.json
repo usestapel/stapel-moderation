@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "moderation.screen_draft",
+  "description": "Screen an UNPUBLISHED draft synchronously and answer whether it may be published. The payload carries the content itself — title, text, language, photos, author — because a draft has no stored target to read it from. Photos come by either of two doors: \"media\" (CDN refs, resolved through cdn.describe) for content that has already been uploaded, and \"images\" ({data_b64, mime} entries handed straight to the model) for a draft whose bytes have not settled into a ref yet. Not approved: a Case of origin \"draft\" is persisted with its Verdict, resolved, and the refusal is appealable through the ordinary appeal flow; approved: nothing is persisted, so an approved draft never enters the human queue. A screener that could not answer honours ON_SCREENING_FAILURE / ON_SCREENING_UNAVAILABLE and never returns allowed=true on the strength of a failure. Response: {\"allowed\": boolean, \"decision\": string, \"reason_code\": string, \"rationale\": string, \"confidence\": number|null, \"source\": string, \"case_id\": string|null, \"appeal_url\": string}.",
+  "type": "object",
+  "required": [
+    "target_type"
+  ],
+  "properties": {
+    "target_type": {
+      "type": "string",
+      "description": "Registry key; an unregistered type raises. The policy decides the rules, the reason vocabulary and whether media is screened."
+    },
+    "title": {
+      "type": "string",
+      "description": "The draft's title, \"\" for a target family that has none."
+    },
+    "text": {
+      "type": "string",
+      "description": "The draft's body text."
+    },
+    "language": {
+      "type": "string",
+      "description": "BCP-47 tag of the draft, \"\" when the composer does not know."
+    },
+    "media": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "CDN media refs (\"<type>/<hash>\"), resolved through cdn.describe and bounded by MAX_MEDIA_PER_CASE."
+    },
+    "author_id": {
+      "type": "string",
+      "description": "The draft's author. Also the default subject of the case a refusal persists."
+    },
+    "subject_user_id": {
+      "type": "string",
+      "description": "The person a refusal is about, when that is not the author_id. Defaults to author_id."
+    },
+    "reports": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Reason codes of existing complaints to give the screener as context. Ordinarily empty — a draft nobody has seen has no complaints."
+    },
+    "images": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "data_b64",
+          "mime"
+        ],
+        "properties": {
+          "data_b64": {
+            "type": "string",
+            "description": "Base64 of the image bytes."
+          },
+          "mime": {
+            "type": "string",
+            "description": "Must be image/*; anything else refuses the call."
+          }
+        },
+        "additionalProperties": false
+      },
+      "description": "Inline image bytes for a draft that has no CDN ref yet. Bounded by MAX_MEDIA_PER_CASE (count) and MAX_INLINE_IMAGE_BYTES (total decoded size); over either bound the call is REFUSED rather than trimmed, because a trimmed draft is a verdict about photos nobody looked at."
+    }
+  },
+  "additionalProperties": false
+}

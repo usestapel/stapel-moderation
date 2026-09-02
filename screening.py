@@ -130,16 +130,124 @@ def _sanitize(text: str) -> str:
     return sanitize_for_rag(text)
 
 
+def _absolute_url(url: str) -> str:
+    """Resolve one ``cdn.describe`` variant URL against ``MEDIA_BASE_URL``.
+
+    ``cdn.describe`` answers RELATIVE variant URLs on purpose — it is
+    host-agnostic and leaves the origin to whoever renders the page — so what
+    it hands back is ``/media/cdn/<ref>/<tier>.webp``, a path with no scheme
+    and no host. Forwarding that to a completion provider is not a degraded
+    image, it is a 400 (``invalid_image_url``) on all three attempts of the
+    retry ladder, and a case parked on a ``policy_default`` verdict.
+
+    Returns ``""`` when the URL is relative and no origin is configured. The
+    caller skips such an image rather than sending it, which is the same
+    posture the unresolvable-ref branch already takes: one photo nobody could
+    resolve is not a reason to abandon the text next to it.
+    """
+    from urllib.parse import urljoin, urlsplit
+
+    from .conf import moderation_settings
+
+    if urlsplit(url).scheme in ("http", "https"):
+        return url
+    base = str(moderation_settings.MEDIA_BASE_URL or "").strip()
+    if not base:
+        return ""
+    return urljoin(base if base.endswith("/") else base + "/", url.lstrip("/"))
+
+
+def _fetch_image(url: str) -> Optional[tuple]:
+    """Fetch one variant's bytes for the ``data_b64`` transport.
+
+    Returns ``(bytes, mime)`` or ``None``; ``None`` is always a skip, never a
+    raise, for the same reason as everywhere else in this file — an image the
+    fleet could not hand over is not a reason to lose the text screening, and
+    it is emphatically not a reason to burn a retry attempt.
+
+    Bounded twice, both bounds being settings rather than constants:
+    ``MEDIA_FETCH_TIMEOUT_SECONDS`` (a hanging CDN must not hold the
+    screening Task open until its deadline) and ``MEDIA_FETCH_MAX_BYTES``,
+    measured on the bytes actually read — a ``Content-Length`` is a claim by
+    the other end, and one byte over the cap is a skip rather than a
+    truncation, because half a JPEG is not a picture.
+    """
+    import urllib.request
+    from urllib.error import URLError
+
+    from .conf import moderation_settings
+
+    max_bytes = int(moderation_settings.MEDIA_FETCH_MAX_BYTES)
+    timeout = float(moderation_settings.MEDIA_FETCH_TIMEOUT_SECONDS)
+    request = urllib.request.Request(url, headers={"User-Agent": "stapel-moderation"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            # One byte over the cap is enough to know it is over the cap.
+            body = response.read(max_bytes + 1)
+            declared = ""
+            headers = getattr(response, "headers", None)
+            if headers is not None:
+                declared = str(headers.get("Content-Type") or "").split(";")[0].strip()
+    except (URLError, OSError, ValueError) as exc:  # noqa: BLE001 — a skip, not a failure
+        logger.info("moderation: could not fetch media bytes from %s: %s", url, exc)
+        return None
+    if not body:
+        logger.info("moderation: media fetch from %s returned no bytes", url)
+        return None
+    if len(body) > max_bytes:
+        logger.info(
+            "moderation: media at %s is over MEDIA_FETCH_MAX_BYTES (%s), skipped",
+            url,
+            max_bytes,
+        )
+        return None
+    return body, declared
+
+
 def _media_images(content) -> list:
-    """Resolve the target's media refs into ``llm.complete`` image entries."""
+    """Resolve the target's media refs into ``llm.complete`` image entries.
+
+    Two transports, and ``MEDIA_TRANSPORT`` finally decides between them:
+
+    ``"url"``
+        the provider fetches the image itself, which needs an address the
+        provider can actually reach — a relative CDN path absolutized against
+        ``MEDIA_BASE_URL``, or nothing at all.
+
+    ``"data_b64"``
+        the bytes ride in the payload. This is the transport that works when
+        the provider cannot reach the fleet inbound, which behind a proxy or
+        on a private network is the ordinary case rather than the exotic one.
+
+    Before either of them: ``content.extra["inline_images"]`` short-circuits
+    the whole function. Those are bytes a caller HANDED us — a draft holds
+    photos before any upload has settled into a ref, so there is nothing for
+    ``cdn.describe`` to resolve and nothing to fetch. They arrive already
+    validated and bounded (``services._normalize_inline_images``) and go to
+    the model as they are.
+
+    Every branch that cannot produce a usable image LOGS and continues. A
+    silent drop is what let a live stand screen text only for its entire
+    lifetime while every case said "screened".
+    """
+    import base64
+    import mimetypes
+
     from stapel_core.comm import CommError, call
 
     from .conf import moderation_settings
+
+    inline = list((content.extra or {}).get("inline_images") or ())
+    if inline:
+        return [
+            {"data_b64": entry["data_b64"], "mime": entry["mime"]} for entry in inline
+        ]
 
     refs = list(content.media or ())[: int(moderation_settings.MAX_MEDIA_PER_CASE)]
     if not refs:
         return []
     tier = int(moderation_settings.MEDIA_SCREEN_TIER)
+    transport = str(moderation_settings.MEDIA_TRANSPORT or "url").lower()
     images = []
     for ref in refs:
         try:
@@ -160,8 +268,42 @@ def _media_images(content) -> list:
                 best = variant
         if best is None and variants:
             best = variants[0]
-        if best and best.get("url"):
-            images.append({"url": best["url"]})
+        if not best or not best.get("url"):
+            continue
+
+        url = _absolute_url(str(best["url"]))
+        if not url:
+            logger.warning(
+                "moderation: media ref %s resolves to the relative URL %s and "
+                "STAPEL_MODERATION['MEDIA_BASE_URL'] is empty — the image is "
+                "SKIPPED; the text is still screened (see moderation.W007)",
+                ref,
+                best["url"],
+            )
+            continue
+
+        if transport != "data_b64":
+            images.append({"url": url})
+            continue
+
+        fetched = _fetch_image(url)
+        if fetched is None:
+            continue
+        body, declared = fetched
+        mime = (
+            str(best.get("mime") or "")
+            or str(described.get("mime") or "")
+            or declared
+            or (mimetypes.guess_type(url)[0] or "")
+        )
+        if not mime:
+            logger.info(
+                "moderation: media ref %s has no known content type, skipped", ref
+            )
+            continue
+        images.append(
+            {"data_b64": base64.b64encode(body).decode("ascii"), "mime": mime}
+        )
     return images
 
 

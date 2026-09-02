@@ -1,8 +1,8 @@
-# stapel-moderation 0.4.0
+# stapel-moderation 0.5.0
 
 The fleet's single producer of moderation verdicts: one target-generic queue over listings, reviews, chat messages and profiles, keyed by an opaque (target_type, target_key) and driven by a host-registered policy per type. One Case per target however many people complain, one status vocabulary in the whole module, an append-only Verdict and an append-only CaseEvent audit trail whose mutations are FORBIDDEN by mandate declaration. Screening is a comm-Task (deterministic rules, then schema-constrained llm.complete) with a closed hold-for-a-human default when the automation cannot answer. Resolution ACTS on the target by emitting moderation.completed, which stapel-listings and stapel-reviews already consume. Sanctions carry a kind, a scope, a reason, a clock, an appeal and an audit trail, and they bite through core's cross-service user blacklist — the hook every request path already checked and nobody had ever called. Plus DSA artefacts generated from the registries: a public policy disclosure, a statement of reasons on every takedown, an acknowledgement to every complainant, and an internal appeal heard by a different moderator.
 
-Contract: axes 11 · surface 59 · extension points 6 · operations 18 · error codes 70.
+Contract: axes 11 · surface 60 · extension points 6 · operations 18 · error codes 70.
 Generated from docs/capabilities.json by `stapel-llms-txt` — do not edit; drift-gated by `make contract-check`.
 
 ## Configuration axes — what a product switches on
@@ -44,6 +44,9 @@ This is the answer to "does Stapel already have something for X?". `instead of` 
   Ask the type's can_report callback whether this reporter may file. Fail-OPEN when unset; a callback that raises blocks the write rather than defaulting to permissive.
 - check_can_view_content — stapel_moderation.registry.check_can_view_content
   Ask the type's can_view_content callback about a moderator's read. Fail-OPEN by design — the caller already cleared the staff mandate, and blanking the card hides content from the person paid to look at it.
+- screen_draft — stapel_moderation.services.screen_draft
+  instead of: calling llm.complete from the composer view, publishing first and moderating afterwards
+  Screen an UNPUBLISHED draft inline and answer whether it may be published — the synchronous half, for the composer that wants a refusal before anything goes out. A refusal persists a real case and comes back with an appeal address; an approval persists nothing, so the human queue never fills with cleared drafts.
 - transition — stapel_moderation.services.transition
   instead of: Case.state = ...; case.save()
   Move a case along a DECLARED edge and audit it in the same transaction; an undeclared edge raises instead of being assigned.

@@ -256,6 +256,75 @@ def check_beat_schedule(app_configs, **kwargs):
 
 
 @checks.register(checks.Tags.compatibility)
+def check_media_transport(app_configs, **kwargs):
+    """W007: media screening that silently screens no media.
+
+    The exact misconfiguration a live stand ran for its whole life.
+    ``cdn.describe`` answers RELATIVE variant URLs by design, the ``"url"``
+    transport hands them to a completion provider, and a provider answers a
+    bare path with ``invalid_image_url`` — so every case carrying a real
+    photo failed screening three times out of three and parked on a
+    ``policy_default`` verdict, while the cases that "passed" were the ones
+    whose media ref did not resolve at all and were screened on text alone.
+
+    There is no runtime symptom to read: the queue looks busy, the verdicts
+    look screened, and the one true sentence — this deployment has never
+    shown a photo to the screener — is nowhere. So it is said at boot.
+    """
+    from .conf import moderation_settings
+    from .registry import get_target_types
+
+    transport = str(moderation_settings.MEDIA_TRANSPORT or "url").lower()
+    if transport not in ("url", "data_b64"):
+        return [checks.Error(
+            f"STAPEL_MODERATION['MEDIA_TRANSPORT'] is {transport!r}; only "
+            f"'url' and 'data_b64' exist.",
+            id="stapel_moderation.E008",
+        )]
+    if str(moderation_settings.MEDIA_BASE_URL or "").strip():
+        return []
+    if not moderation_settings.SCREEN_ENABLED:
+        return []
+    from .registry import resolve_policy
+
+    with_media = sorted(
+        name
+        for name in get_target_types()
+        if resolve_policy(name)["screen"] and resolve_policy(name)["media"]
+    )
+    if not with_media:
+        return []
+    if transport == "url":
+        return [checks.Warning(
+            "STAPEL_MODERATION['MEDIA_TRANSPORT'] = 'url' with an empty "
+            "MEDIA_BASE_URL, while these target types screen media: "
+            + ", ".join(with_media)
+            + ". cdn.describe answers RELATIVE variant URLs, and a completion "
+            "provider handed a bare path answers invalid_image_url — so every "
+            "photo is dropped from every screening and only the text is "
+            "judged, with nothing at runtime saying so.",
+            hint="Set STAPEL_MODERATION['MEDIA_BASE_URL'] to the origin those "
+                 "paths hang off (\"https://cdn.example.com\"), or switch "
+                 "MEDIA_TRANSPORT to 'data_b64' — which needs the same origin "
+                 "to fetch from, but reaches it from the fleet rather than "
+                 "from the provider. A target type that has no images to "
+                 "screen sets \"media\": False in its policy.",
+            id="stapel_moderation.W007",
+        )]
+    return [checks.Warning(
+        "STAPEL_MODERATION['MEDIA_TRANSPORT'] = 'data_b64' with an empty "
+        "MEDIA_BASE_URL, while these target types screen media: "
+        + ", ".join(with_media)
+        + ". A relative cdn.describe URL has no origin to be fetched from, so "
+        "the bytes are never read and the image is skipped.",
+        hint="Set STAPEL_MODERATION['MEDIA_BASE_URL'] to the origin this "
+             "process reaches the CDN at — for this transport it may be an "
+             "internal address, since the provider never fetches anything.",
+        id="stapel_moderation.W007",
+    )]
+
+
+@checks.register(checks.Tags.compatibility)
 def check_gdpr_declaration(app_configs, **kwargs):
     """W005: the module holds PII the host has not declared to stapel-gdpr."""
     from django.conf import settings
@@ -327,6 +396,7 @@ __all__ = [
     "check_auto_resolve",
     "check_beat_schedule",
     "check_gdpr_declaration",
+    "check_media_transport",
     "check_notification_types",
     "check_screening_failure_policy",
     "check_target_types",

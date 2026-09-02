@@ -102,8 +102,37 @@ DEFAULTS = {
     # screen is paid for in full. The cap is the price control.
     "MAX_MEDIA_PER_CASE": 4,
     # "url" (the vendor fetches it — requires publicly reachable CDN URLs)
-    # or "data_b64" (we inline it, bounded by the broker's max_payload).
+    # or "data_b64" (we fetch the bytes and inline them, bounded below).
+    #
+    # Until 0.5.0 this key was declared and never read: `_media_images`
+    # forwarded whatever `cdn.describe` answered, which is a HOST-AGNOSTIC
+    # relative path, so every provider replied "invalid_image_url" and every
+    # listing with a real photo failed screening three times out of three.
+    # A switch nobody reads proves nothing; both branches are implemented.
     "MEDIA_TRANSPORT": "url",
+    # The absolute origin a RELATIVE cdn.describe variant URL is resolved
+    # against ("https://cdn.example.com", no trailing path needed). Empty is
+    # the honest default — a library cannot know a host's public origin —
+    # and under MEDIA_TRANSPORT="url" an empty value means relative variants
+    # are SKIPPED with a log line instead of being handed to a provider that
+    # cannot fetch them. moderation.W007 says so at boot.
+    "MEDIA_BASE_URL": "",
+    # Bounds on the "data_b64" fetch. The cap is measured on the bytes read,
+    # not on a Content-Length a server is free to lie about: over it the
+    # image is skipped, never truncated — half a JPEG is not a picture, and
+    # a broker refusing an oversized payload fails the whole screening.
+    "MEDIA_FETCH_MAX_BYTES": 5_000_000,
+    # A CDN that hangs must not hold a screening Task open to its deadline.
+    "MEDIA_FETCH_TIMEOUT_SECONDS": 10,
+    # Ceiling on the TOTAL decoded bytes of the inline images one
+    # `screen_draft` call may carry. A draft holds photo bytes that no CDN
+    # has a ref for yet, so those bytes ride in the payload — and the whole
+    # payload has to fit through the broker. Over the bound the call is
+    # REFUSED (services.InvalidDraftImage), never trimmed to fit: a trimmed
+    # draft is a verdict about photos nobody looked at, which is the exact
+    # fail-open this release exists to close. The count is bounded by
+    # MAX_MEDIA_PER_CASE, the same price control the async path uses.
+    "MAX_INLINE_IMAGE_BYTES": 8_000_000,
 
     # ── Complaint intake (spec §6) ───────────────────────────────────
     # CLOSED by default (§20.5). Opening it turns contact_email into a
