@@ -122,6 +122,10 @@
     {
       "select": "functions",
       "path": "tasks.py"
+    },
+    {
+      "select": "functions",
+      "path": "beat.py"
     }
   ],
   "surface": {

@@ -223,7 +223,7 @@ def check_beat_schedule(app_configs, **kwargs):
     """
     from django.conf import settings
 
-    from .tasks import BEAT_TASK_NAMES, REARM_TASK_NAME
+    from .beat import BEAT_TASK_NAMES, REARM_TASK_NAME
 
     schedule = getattr(settings, "CELERY_BEAT_SCHEDULE", None)
     if not schedule:
@@ -239,7 +239,8 @@ def check_beat_schedule(app_configs, **kwargs):
     warnings = [checks.Warning(
         "CELERY_BEAT_SCHEDULE has no entry for: " + ", ".join(missing),
         hint="CELERY_BEAT_SCHEDULE = {**get_moderation_beat_schedule(), ...} "
-             "(stapel_moderation.tasks).",
+             "(stapel_moderation.beat — NOT .tasks, which cannot be imported "
+             "from a settings module).",
         id="stapel_moderation.W004",
     )]
     if REARM_TASK_NAME in missing:

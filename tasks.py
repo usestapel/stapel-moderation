@@ -18,9 +18,11 @@ Celery is OPTIONAL: each function is importable and callable on its own, and
 is additionally registered as a shared task under a stable name when celery
 is installed.
 
-Wire them into a host's beat schedule::
+Wire them into a host's beat schedule — importing from ``beat``, not from
+here. This module reaches ``.services`` -> ``.models`` at import time, so a
+settings file that imports it raises ``AppRegistryNotReady``::
 
-    from stapel_moderation.tasks import get_moderation_beat_schedule
+    from stapel_moderation.beat import get_moderation_beat_schedule
 
     CELERY_BEAT_SCHEDULE = {**get_moderation_beat_schedule(), ...}
 """
@@ -39,19 +41,17 @@ from .services import SCREEN_TASK
 
 logger = logging.getLogger(__name__)
 
-#: Stable names a beat schedule references (never renamed by a refactor).
-SWEEP_TASK_NAME = "stapel_moderation.tasks.sweep_stale_cases"
-RESCREEN_TASK_NAME = "stapel_moderation.tasks.rescreen_stuck_cases"
-REARM_TASK_NAME = "stapel_moderation.tasks.rearm_active_sanctions"
-EXPIRE_TASK_NAME = "stapel_moderation.tasks.expire_sanctions"
-PURGE_TASK_NAME = "stapel_moderation.tasks.purge_expired_cases"
-
-BEAT_TASK_NAMES = (
-    SWEEP_TASK_NAME,
-    RESCREEN_TASK_NAME,
-    REARM_TASK_NAME,
+# The names and the schedule live in `beat.py`, which imports settings and
+# nothing else — this module cannot be imported from a settings file (see
+# beat.py's docstring). Re-exported so the documented path keeps working.
+from .beat import (  # noqa: E402,F401  (re-export)
+    BEAT_TASK_NAMES,
     EXPIRE_TASK_NAME,
     PURGE_TASK_NAME,
+    REARM_TASK_NAME,
+    RESCREEN_TASK_NAME,
+    SWEEP_TASK_NAME,
+    get_moderation_beat_schedule,
 )
 
 
@@ -494,35 +494,6 @@ def purge_expired_cases() -> dict:
     )
     return {"cases": cases_deleted, "sanctions": sanctions_deleted}
 
-
-def get_moderation_beat_schedule() -> dict:
-    """Beat entries for every scheduled job, on the configured cadences."""
-    from celery.schedules import crontab
-
-    from .conf import moderation_settings
-
-    return {
-        "moderation-sweep-stale-cases": {
-            "task": SWEEP_TASK_NAME,
-            "schedule": crontab(**dict(moderation_settings.SWEEP_SCHEDULE or {})),
-        },
-        "moderation-rescreen-stuck-cases": {
-            "task": RESCREEN_TASK_NAME,
-            "schedule": crontab(**dict(moderation_settings.RESCREEN_SCHEDULE or {})),
-        },
-        "moderation-rearm-sanctions": {
-            "task": REARM_TASK_NAME,
-            "schedule": crontab(**dict(moderation_settings.REARM_SCHEDULE or {})),
-        },
-        "moderation-expire-sanctions": {
-            "task": EXPIRE_TASK_NAME,
-            "schedule": crontab(**dict(moderation_settings.REARM_SCHEDULE or {})),
-        },
-        "moderation-retention-purge": {
-            "task": PURGE_TASK_NAME,
-            "schedule": crontab(**dict(moderation_settings.PURGE_SCHEDULE or {})),
-        },
-    }
 
 
 try:  # pragma: no cover — exercised by whichever profile the host installs

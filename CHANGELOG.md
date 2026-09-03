@@ -4,6 +4,36 @@ All notable changes to stapel-moderation are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Pre-1.0 semver: **minor = breaking**, patch = compatible.
 
+## [0.6.1] — 2026-09-03
+
+### Fixed — the beat schedule could not be wired the way W004 asks
+
+`moderation.W004`'s hint says to write
+`CELERY_BEAT_SCHEDULE = {**get_moderation_beat_schedule(), ...}` in settings.
+A host that did got `AppRegistryNotReady`: `tasks.py` reaches `.services` and
+`.screening`, both of which import `.models` at module level
+(`@task_handler(SCREEN_TASK)` needs the name at decoration time), and a
+settings module runs before `django.setup()`.
+
+The workaround is to merge the schedule from a Celery `on_after_finalize`
+signal instead. The jobs then run — and `manage.py check` goes on printing
+W004 about jobs that *are* scheduled, because the check reads
+`settings.CELERY_BEAT_SCHEDULE` and the settings dict never learned about
+them. A warning that fires when the thing is fine is exactly how the real one
+came to be ignored: W004 and `stapel_search.W003` printed at every boot of a
+live stand for months while 51 cases sat in a queue no job was draining.
+
+`stapel_moderation.beat` now holds the task names and the schedule and
+imports settings and nothing else — the property `stapel_search.tasks`
+already had, and the reason a host could spell its search entries in settings
+but not its moderation ones.
+
+- `stapel_moderation.beat`: `get_moderation_beat_schedule()`, `BEAT_TASK_NAMES`
+  and the five `*_TASK_NAME` constants.
+- `tasks.py` re-exports all of them, so the previously documented import path
+  keeps working.
+- W004's hint names `stapel_moderation.beat` and says why it is not `.tasks`.
+
 ## [0.6.0] — 2026-09-03
 
 ### Added — a case that nothing could move now recovers

@@ -288,3 +288,48 @@ def test_the_rescreen_job_is_in_the_shipped_beat_schedule():
     pytest.importorskip("celery")
     scheduled = {entry["task"] for entry in get_moderation_beat_schedule().values()}
     assert RESCREEN_TASK_NAME in scheduled
+
+
+def test_the_beat_schedule_is_importable_before_django_is_ready():
+    """A host must be able to write the one line W004's hint asks for.
+
+    `stapel_moderation.tasks` cannot be imported from a settings module: it
+    reaches `.services` -> `.models`, and a settings module is executed
+    before `django.setup()`, so the import raises AppRegistryNotReady. A host
+    following the hint therefore could not boot, and the workaround — merging
+    the schedule later, after the app is finalized — leaves `manage.py check`
+    printing W004 about jobs that ARE scheduled. A warning that fires when
+    the thing is fine is how the real one got ignored for the stand's whole
+    life.
+
+    `stapel_search.tasks` already has this property (every import inside a
+    function). `stapel_moderation.beat` gives moderation the same one: it
+    imports settings and nothing else, so `CELERY_BEAT_SCHEDULE` can be
+    spelled in settings where the check can read it.
+    """
+    import subprocess
+    import sys
+
+    # A subprocess with no Django set up at all — the settings-module moment.
+    code = (
+        "from stapel_moderation.beat import ("
+        "  BEAT_TASK_NAMES, RESCREEN_TASK_NAME, get_moderation_beat_schedule)\n"
+        "assert RESCREEN_TASK_NAME in BEAT_TASK_NAMES\n"
+        "print('ok')\n"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True
+    )
+    assert proc.returncode == 0, (
+        "stapel_moderation.beat must import with no Django app registry:\n"
+        + proc.stderr
+    )
+
+
+def test_tasks_still_re_exports_the_schedule():
+    """The old import path keeps working — a released host wrote it."""
+    from stapel_moderation import beat, tasks
+
+    assert tasks.get_moderation_beat_schedule is beat.get_moderation_beat_schedule
+    assert tasks.BEAT_TASK_NAMES == beat.BEAT_TASK_NAMES
+    assert tasks.RESCREEN_TASK_NAME == beat.RESCREEN_TASK_NAME
