@@ -4,6 +4,27 @@ All notable changes to stapel-moderation are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Pre-1.0 semver: **minor = breaking**, patch = compatible.
 
+## [0.5.1] — 2026-09-03
+
+### Added
+
+- `stapel_moderation.W008`: the comm timeout is shorter than the screen it
+  has to wait for. `moderation.screen_draft` is the one Function here a
+  caller sits and waits on, and screening a photo against a real provider
+  takes seconds; core's default `FUNCTION_TIMEOUT` is 5.0. What makes that
+  worth a check rather than a paragraph is the shape of the failure: every
+  caller's answer to a timeout is its fail-open branch — a screener that
+  cannot answer must never block a seller, which is the right policy — so
+  the timeout silently converts "screen this draft" into "do not screen this
+  draft" while the endpoint returns 200 and the deploy gate stays green. A
+  gate defeated by its own guard rail, visible only here, at boot, where the
+  two numbers can be compared. The hint names the one-line fix
+  (`STAPEL_COMM["FUNCTION_TIMEOUTS"]`, stapel-core 0.58.0) and the check
+  accepts a raised global timeout on older core.
+- The `moderation.screen_draft` schema now states the timeout a caller must
+  give it, and why. The number was previously discoverable only by reading
+  this module's settings from inside another service.
+
 ## [0.5.0] — 2026-09-03
 
 ### Fixed — image screening had never once looked at an image

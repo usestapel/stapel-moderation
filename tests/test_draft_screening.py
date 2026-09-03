@@ -455,3 +455,71 @@ def test_the_comm_function_carries_inline_images(
     }
     assert answer["allowed"] is False
     assert llm_double["calls"][0]["images"] == [{"data_b64": blob, "mime": "image/jpeg"}]
+
+
+# --- W008: the comm timeout a synchronous screen needs ---------------------
+
+
+def test_a_comm_timeout_below_the_screen_timeout_is_named(settings):
+    """The defect this closes is a timeout that DEFEATS a gate.
+
+    `moderation.screen_draft` is the one Function in this module a caller
+    waits on, and a live screening measured ~3s. Under core's 5s default
+    FUNCTION_TIMEOUT it is one slow model away from a TimeoutError — and
+    every caller's answer to a timeout is its fail-open branch, because a
+    screener that cannot answer must never block a seller. So the timeout
+    silently converts "screen this draft" into "do not screen this draft",
+    while both the endpoint and the gate keep reporting success.
+
+    A warning rather than an error: a deployment that never calls the
+    Function synchronously is entitled to core's default.
+    """
+    from stapel_moderation.checks import check_screen_draft_timeout
+
+    settings.STAPEL_COMM = {"FUNCTION_TIMEOUT": 5.0}
+    settings.STAPEL_MODERATION = {"SCREEN_TIMEOUT_SECONDS": 60}
+    findings = check_screen_draft_timeout(None)
+    assert [f.id for f in findings] == ["stapel_moderation.W008"]
+    assert "5" in str(findings[0]) and "60" in str(findings[0])
+
+
+def test_a_named_timeout_silences_it(settings):
+    """The fix the check points at, in the form core 0.58.0 gives it."""
+    from stapel_moderation.checks import check_screen_draft_timeout
+
+    settings.STAPEL_COMM = {
+        "FUNCTION_TIMEOUT": 5.0,
+        "FUNCTION_TIMEOUTS": {"moderation.screen_draft": 60.0},
+    }
+    settings.STAPEL_MODERATION = {"SCREEN_TIMEOUT_SECONDS": 60}
+    assert check_screen_draft_timeout(None) == []
+
+
+def test_a_prefix_entry_silences_it_too(settings):
+    from stapel_moderation.checks import check_screen_draft_timeout
+
+    settings.STAPEL_COMM = {
+        "FUNCTION_TIMEOUT": 5.0,
+        "FUNCTION_TIMEOUTS": {"moderation.": 90.0},
+    }
+    settings.STAPEL_MODERATION = {"SCREEN_TIMEOUT_SECONDS": 60}
+    assert check_screen_draft_timeout(None) == []
+
+
+def test_a_generous_global_timeout_silences_it(settings):
+    """A deployment that raised the global number has already answered."""
+    from stapel_moderation.checks import check_screen_draft_timeout
+
+    settings.STAPEL_COMM = {"FUNCTION_TIMEOUT": 90.0}
+    settings.STAPEL_MODERATION = {"SCREEN_TIMEOUT_SECONDS": 60}
+    assert check_screen_draft_timeout(None) == []
+
+
+def test_screening_switched_off_is_silent(settings):
+    """Nothing waits on the Function, so nothing can be cut short by it."""
+    from stapel_moderation.checks import check_screen_draft_timeout
+
+    settings.STAPEL_COMM = {"FUNCTION_TIMEOUT": 5.0}
+    settings.STAPEL_MODERATION = {"SCREEN_ENABLED": False, "SCREEN_TIMEOUT_SECONDS": 60}
+    assert check_screen_draft_timeout(None) == []
+

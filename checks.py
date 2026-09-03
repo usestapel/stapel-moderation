@@ -391,12 +391,76 @@ def check_verdict_consumers(app_configs, **kwargs):
     return warnings
 
 
+
+@checks.register("stapel_moderation")
+def check_screen_draft_timeout(app_configs, **kwargs):
+    """W008: the comm timeout is shorter than the screen it has to wait for.
+
+    ``moderation.screen_draft`` is the one Function in this module a caller
+    sits and waits on, and its whole point is to answer BEFORE a draft is
+    published. Screening a photo against a real provider takes seconds;
+    core's default ``FUNCTION_TIMEOUT`` is 5.0.
+
+    What makes that worth a check rather than a paragraph is the shape of
+    the failure. Every caller's answer to a timeout is its fail-open branch
+    — a screener that cannot answer must never block a seller, which is the
+    right policy — so a timeout does not surface as an error anywhere. It
+    silently converts "screen this draft" into "do not screen this draft"
+    while the endpoint returns 200 and the deploy gate stays green. That is
+    a gate defeated by its own guard rail, and the only place it is visible
+    is here, at boot, where the two numbers can be compared.
+
+    The remedy is one line and is named in the hint:
+    ``STAPEL_COMM["FUNCTION_TIMEOUTS"]`` (stapel-core 0.58.0), which lets a
+    slow Function be given the time it needs without slowing every other
+    call in the fleet down to match. On older core the same fix is a raised
+    global ``FUNCTION_TIMEOUT``, which the check accepts too.
+    """
+    from stapel_core.comm.config import comm_setting
+
+    from .conf import moderation_settings
+
+    if not moderation_settings.SCREEN_ENABLED:
+        return []
+
+    needed = float(moderation_settings.SCREEN_TIMEOUT_SECONDS)
+    name = "moderation.screen_draft"
+    try:
+        from stapel_core.comm.functions import resolve_timeout
+
+        effective = float(resolve_timeout(name, None))
+    except ImportError:
+        # stapel-core before 0.58.0 has no per-function map, so the global
+        # number is the whole answer. Read it the same way core does rather
+        # than guessing at its default.
+        effective = float(comm_setting("FUNCTION_TIMEOUT", 5.0))
+
+    if effective >= needed:
+        return []
+    return [
+        checks.Warning(
+            f"A caller of {name!r} that passes no timeout gets "
+            f"{effective:g}s, but SCREEN_TIMEOUT_SECONDS allows the screen "
+            f"itself {needed:g}s. The call is cut short before the screener "
+            "answers, and because a screener that cannot answer must not "
+            "block a seller, every caller then takes its fail-open branch: "
+            "the draft is let through unscreened, at HTTP 200, with nothing "
+            "anywhere saying it was never looked at.",
+            hint=f"Set STAPEL_COMM['FUNCTION_TIMEOUTS'] = {{'{name}': "
+                 f"{needed:g}}} (stapel-core 0.58.0+), or raise "
+                 "STAPEL_COMM['FUNCTION_TIMEOUT'] to at least that. Callers "
+                 "that pass an explicit timeout are unaffected either way.",
+            id="stapel_moderation.W008",
+        )
+    ]
+
 __all__ = [
     "check_anonymous_reports",
     "check_auto_resolve",
     "check_beat_schedule",
     "check_gdpr_declaration",
     "check_media_transport",
+    "check_screen_draft_timeout",
     "check_notification_types",
     "check_screening_failure_policy",
     "check_target_types",
