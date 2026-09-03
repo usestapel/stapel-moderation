@@ -117,26 +117,7 @@ def screen_case(payload: dict) -> dict:
 
     reports = list(case.reports.values_list("reason_code", flat=True))
     screener = get_screener()
-    # Timed and counted around the screener itself: a ScreeningUnavailable
-    # propagates (that is what buys the retry ladder), so the failure is
-    # counted here and re-raised rather than swallowed into a return.
-    import time as _time
-
-    from . import metrics as _metrics
-
-    _started = _time.monotonic()
-    try:
-        result = screener(case, content, reports=reports)
-    except Exception:
-        _metrics.record_screen(
-            case.target_type,
-            _metrics.OUTCOME_UNAVAILABLE,
-            seconds=_time.monotonic() - _started,
-        )
-        raise
-    _metrics.record_screen(
-        case.target_type, result.decision, seconds=_time.monotonic() - _started
-    )
+    result = screener(case, content, reports=reports)
 
     # Stamped here and nowhere else: this is the one moment the module can
     # say "the content was actually looked at". ``updated_at`` cannot answer

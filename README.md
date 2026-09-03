@@ -24,7 +24,7 @@ pip install stapel-moderation
 
 | Fact | Value |
 |---|---|
-| Version | `0.6.1` |
+| Version | `0.6.2` |
 | Python | `>=3.11` (3.11, 3.12, 3.13) |
 | HTTP operations | 18 |
 | Config axes | 11 |

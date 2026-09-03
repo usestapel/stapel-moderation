@@ -4,6 +4,26 @@ All notable changes to stapel-moderation are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Pre-1.0 semver: **minor = breaking**, patch = compatible.
 
+## [0.6.2] — 2026-09-03
+
+### Fixed — 0.6.0 and 0.6.1 cannot screen anything
+
+`tasks.screen_case` carried three calls into a `stapel_moderation.metrics`
+module that is not in either release, so the first thing every screening did
+was raise `ImportError`. Every case went to the `ON_SCREENING_FAILURE` park
+instead of to a verdict — which, on the default `"hold"`, means every listing
+lands in the human queue and none is ever screened.
+
+The lines were another change in flight in this repo on the same day, in the
+same file. They reached a release because the commit staged `tasks.py` whole:
+an explicit pathspec keeps another change's *files* out of a commit and does
+nothing about another change's *lines* in a file you are also editing. The
+local suite passed because the untracked `metrics.py` was sitting in the
+working tree; CI, which has only what is committed, went red immediately.
+
+Anyone on 0.6.0 or 0.6.1 should move to 0.6.2. No API change, no migration —
+0.6.0's four columns and `beat.py` are unchanged and still apply.
+
 ## [0.6.1] — 2026-09-03
 
 ### Fixed — the beat schedule could not be wired the way W004 asks
