@@ -83,6 +83,17 @@ Anyone on 0.6.0 or 0.6.1 should move to 0.6.2. No API change, no migration —
 
 ## [0.6.1] — 2026-09-03
 
+> **BROKEN — do not use. Upgrade to 0.6.3.**
+> Both wheels ship a `tasks.screen_case` that does `from . import metrics`,
+> and `metrics.py` is in neither release: it was still untracked when the
+> commit was cut, so the module the code imports was never published. Every
+> screening raises `ImportError` before it reaches a provider and lands in
+> the `ON_SCREENING_FAILURE` park — on the shipped `"hold"` default that
+> means **every listing goes to the human queue and nothing is screened
+> automatically**. A deployment pinned here has a screener that cannot
+> start, and its dashboard will not say so. 0.6.2 removed the calls; 0.6.3
+> restores them together with the module they need.
+
 ### Fixed — the beat schedule could not be wired the way W004 asks
 
 `moderation.W004`'s hint says to write
@@ -112,6 +123,17 @@ but not its moderation ones.
 - W004's hint names `stapel_moderation.beat` and says why it is not `.tasks`.
 
 ## [0.6.0] — 2026-09-03
+
+> **BROKEN — do not use. Upgrade to 0.6.3.**
+> Both wheels ship a `tasks.screen_case` that does `from . import metrics`,
+> and `metrics.py` is in neither release: it was still untracked when the
+> commit was cut, so the module the code imports was never published. Every
+> screening raises `ImportError` before it reaches a provider and lands in
+> the `ON_SCREENING_FAILURE` park — on the shipped `"hold"` default that
+> means **every listing goes to the human queue and nothing is screened
+> automatically**. A deployment pinned here has a screener that cannot
+> start, and its dashboard will not say so. 0.6.2 removed the calls; 0.6.3
+> restores them together with the module they need.
 
 ### Added — a case that nothing could move now recovers
 
