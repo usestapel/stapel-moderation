@@ -998,11 +998,14 @@ def screen_draft(
         subject_user_id=subject_user_id,
     )
 
+    from . import metrics as _metrics
+
     if not policy["screen"] or not moderation_settings.SCREEN_ENABLED:
         result = _draft_fallback(
             moderation_settings.ON_SCREENING_UNAVAILABLE,
             reason_code=REASON_SCREENING_UNAVAILABLE,
         )
+        _metrics.record_draft_screen(target_type, _metrics.OUTCOME_UNAVAILABLE)
     else:
         try:
             result = get_screener()(probe, content, reports=tuple(reports))
@@ -1012,6 +1015,9 @@ def screen_draft(
                 moderation_settings.ON_SCREENING_FAILURE,
                 reason_code=REASON_SCREENING_UNAVAILABLE,
             )
+            _metrics.record_draft_screen(target_type, _metrics.OUTCOME_UNAVAILABLE)
+        else:
+            _metrics.record_draft_screen(target_type, result.decision)
 
     if result.decision == VerdictDecision.APPROVED:
         return DraftScreeningResult(

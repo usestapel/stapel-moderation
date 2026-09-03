@@ -39,3 +39,21 @@ class ModerationConfig(AppConfig):
 
         if ModerationGDPRProvider().section not in gdpr_registry.sections:
             gdpr_registry.register(ModerationGDPRProvider())
+
+        # Create the screening counters at zero, now that the registry knows
+        # which target types exist. A counter that has never been incremented
+        # does not exist, and an alert on a series with no subject reports
+        # nothing rather than firing — which is indistinguishable from
+        # healthy, and is exactly how a 78% screening failure rate ran for
+        # twelve days on a client fleet's stand behind a green dashboard.
+        from . import metrics
+        from .registry import get_target_types
+
+        try:
+            metrics.declare_series(tuple(get_target_types()))
+        except Exception:  # pragma: no cover - never block app startup
+            import logging
+
+            logging.getLogger(__name__).debug(
+                "moderation: screening series not declared", exc_info=True
+            )

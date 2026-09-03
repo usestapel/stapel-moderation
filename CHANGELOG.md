@@ -4,6 +4,63 @@ All notable changes to stapel-moderation are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Pre-1.0 semver: **minor = breaking**, patch = compatible.
 
+## [0.6.3] — 2026-09-03
+
+### Screening becomes a number
+
+**This is the module 0.6.2 was repairing.** The instrumentation below was
+written into `tasks.py` while another change was being committed from the
+same working tree, and `metrics.py` was still untracked — so 0.6.0 and
+0.6.1 shipped a `screen_case` importing a module that was not in either
+release, and every screening raised `ImportError` into the
+`ON_SCREENING_FAILURE` park. 0.6.2 removed the calls to stop the bleeding;
+this release lands the calls and the module they need, together, in one
+commit. A file that is used by a commit and not in it is not a partial
+feature, it is an outage.
+
+This module shipped with no instrumentation at all, and the bill for that
+was twelve days long. On a client fleet's stand, 2026-08-21 → 2026-09-02,
+**215 of 276 screening tasks failed** — a 78% failure rate — and every
+dashboard stayed green throughout.
+
+The module was not wrong. It was, if anything, exactly right: every one of
+those cases landed in the human queue as `needs_review /
+screening_unavailable`, precisely as `ON_SCREENING_FAILURE = "hold"`
+promises, and nothing was published unscreened. That is what made it
+invisible. A degradation that degrades gracefully looks like health from
+every angle except a `GROUP BY` nobody had a reason to run — which is why
+the graceful path is the one that most needs a counter.
+
+- **`moderation_screen_total{target_type,outcome}`** — case screenings by
+  outcome, with `unavailable` for "could not run at all". `unavailable`
+  rising while `approved`/`rejected` fall is the signature of a provider
+  outage; the human queue filling up is the same event, seen an hour later,
+  by a person.
+- **`moderation_screen_seconds{target_type}`** — a measured screen is
+  documented at ~3s against a 45–60s timeout. Nobody could say whether it
+  still was.
+- **`moderation_draft_screen_total{target_type,outcome}`** — the
+  synchronous draft entrance.
+- **`moderation_draft_screen_fail_open_total{target_type}`** — recorded by
+  the CALLER, via `metrics.record_draft_fail_open()`. The decision to let a
+  draft through unscreened belongs to the product (a seller must not be
+  blocked because our provider blinked), but the draft path is the one
+  place where an outage leaves NOTHING behind — no case, no verdict, no
+  queue row, just a log line in a container nobody is tailing. "We could
+  not screen" and "and we let it through anyway" are counted separately, so
+  a deployment that changes its mind about the second does not lose the
+  history of the first.
+- **`metrics.declare_series()`**, called from `ready()` with the registered
+  target types. A counter that has never been incremented does not exist,
+  and `rate(...[15m]) > 0` on a series with no subject does not fire — it
+  reports nothing, which is the same shape as the outage it is meant to
+  catch.
+
+Recording never raises: every call site is doing something more important
+than being observed, and half of them are already on a failure path.
+
+Compatible: additive only. No model, no setting, no signature changes.
+
 ## [0.6.2] — 2026-09-03
 
 ### Fixed — 0.6.0 and 0.6.1 cannot screen anything
