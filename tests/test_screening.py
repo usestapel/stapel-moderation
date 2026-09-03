@@ -627,3 +627,77 @@ def test_no_media_warning_when_the_type_does_not_screen_media(settings):
     )
 
     assert "stapel_moderation.W007" not in {getattr(m, "id", "") for m in run_checks()}
+
+
+# ── A screen that saw no photo must not claim it screened one ────────
+
+
+def test_declared_media_that_all_fails_to_resolve_does_not_approve(
+    content_double, cdn_double, llm_double, settings
+):
+    """The half W007 cannot see: config is right, the refs still do not resolve.
+
+    W007 catches the deployment that could never resolve a variant URL. This
+    is the row-level version, measured on the live stand AFTER 0.5.0 and
+    ``MEDIA_BASE_URL`` were both in place: the listing carries media refs,
+    ``cdn.describe`` answers ``LookupError`` for every one of them, and
+    ``_media_images`` returns ``[]``. ``run_llm`` then omits the ``images``
+    key, the model answers about the text alone, and the verdict is recorded
+    as a full screening — an approval whose evidence never included the photo
+    it was supposed to be about.
+
+    Skipping ONE ref of several is still the right posture (the text and the
+    other photos are real). Skipping ALL of them is a different sentence: this
+    screening did not happen. The machine abstains, and the human queue —
+    which is already this module's answer to "cannot screen" — gets it.
+    """
+    settings.STAPEL_MODERATION = {"MEDIA_BASE_URL": "https://cdn.example.test"}
+    content_double["media"] = ["product/never-uploaded"]  # not in cdn_double
+
+    from stapel_core.comm import mutate_and_emit
+
+    case = _open_case()
+    with mutate_and_emit() as emit_event:
+        services.start_screening(case, emit_event=emit_event)
+
+    case.refresh_from_db()
+    assert case.last_verdict.decision == "needs_review"
+    assert case.last_verdict.reason_code == "media_unavailable"
+    assert case.state == "queued", "the human queue is the fallback, as ever"
+
+
+def test_one_resolvable_ref_among_several_still_screens(
+    content_double, cdn_double, llm_double, settings
+):
+    """Partial resolution is not degradation — do not send real work to a human."""
+    settings.STAPEL_MODERATION = {"MEDIA_BASE_URL": "https://cdn.example.test"}
+    content_double["media"] = ["product/never-uploaded", "product/802d669"]
+
+    from stapel_core.comm import mutate_and_emit
+
+    case = _open_case()
+    with mutate_and_emit() as emit_event:
+        services.start_screening(case, emit_event=emit_event)
+
+    assert llm_double["calls"][0]["images"] == [
+        {"url": "https://cdn.example.test/media/cdn/product/802d669/1080w.webp"}
+    ]
+    case.refresh_from_db()
+    assert case.last_verdict.decision == "approved"
+
+
+def test_a_listing_with_no_photos_at_all_is_screened_on_its_text(
+    content_double, llm_double, settings
+):
+    """No media declared is not degraded media — the ordinary text-only case."""
+    settings.STAPEL_MODERATION = {"MEDIA_BASE_URL": "https://cdn.example.test"}
+    content_double["media"] = []
+
+    from stapel_core.comm import mutate_and_emit
+
+    case = _open_case()
+    with mutate_and_emit() as emit_event:
+        services.start_screening(case, emit_event=emit_event)
+
+    case.refresh_from_db()
+    assert case.last_verdict.decision == "approved"

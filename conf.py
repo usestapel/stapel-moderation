@@ -74,6 +74,21 @@ DEFAULTS = {
     # everything a human had not reached, needs_review included, so human
     # review existed only on paper. Setting a number prints moderation.W002.
     "AUTO_RESOLVE_STALE_QUEUE": None,
+    # ── Recovering a case nothing can move (tasks.rescreen_stuck_cases) ──
+    # Seconds a QUEUED case may sit untouched before the sweep hands it back
+    # to the screening ladder. This is the OPPOSITE of the setting above and
+    # the reason that one can stay None forever: the answer to a stuck case
+    # is to screen it again, never to decide it. A live stand parked 51 cases
+    # here — needs_review verdicts, screen_attempts=3, the oldest two days
+    # old — because `sweep_stale_cases` returns work INTO this queue and
+    # nothing drains it.
+    "RESCREEN_STUCK_AFTER": 3600,
+    # How many automatic re-screens one case gets. Each attempt waits twice
+    # as long as the last (RESCREEN_STUCK_AFTER * 2**attempts), so the cap is
+    # reached in days, not minutes. Past it the case is ESCALATED — surfaced
+    # for a human, not retried forever and not auto-decided.
+    "RESCREEN_MAX_ATTEMPTS": 3,
+    "RESCREEN_SCHEDULE": {"minute": "*/15"},
 
     # ── Queue (spec §7) ──────────────────────────────────────────────
     # A claim is a lease, not a lock: it expires and the case returns to

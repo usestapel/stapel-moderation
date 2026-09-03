@@ -41,12 +41,14 @@ logger = logging.getLogger(__name__)
 
 #: Stable names a beat schedule references (never renamed by a refactor).
 SWEEP_TASK_NAME = "stapel_moderation.tasks.sweep_stale_cases"
+RESCREEN_TASK_NAME = "stapel_moderation.tasks.rescreen_stuck_cases"
 REARM_TASK_NAME = "stapel_moderation.tasks.rearm_active_sanctions"
 EXPIRE_TASK_NAME = "stapel_moderation.tasks.expire_sanctions"
 PURGE_TASK_NAME = "stapel_moderation.tasks.purge_expired_cases"
 
 BEAT_TASK_NAMES = (
     SWEEP_TASK_NAME,
+    RESCREEN_TASK_NAME,
     REARM_TASK_NAME,
     EXPIRE_TASK_NAME,
     PURGE_TASK_NAME,
@@ -115,7 +117,34 @@ def screen_case(payload: dict) -> dict:
 
     reports = list(case.reports.values_list("reason_code", flat=True))
     screener = get_screener()
-    result = screener(case, content, reports=reports)
+    # Timed and counted around the screener itself: a ScreeningUnavailable
+    # propagates (that is what buys the retry ladder), so the failure is
+    # counted here and re-raised rather than swallowed into a return.
+    import time as _time
+
+    from . import metrics as _metrics
+
+    _started = _time.monotonic()
+    try:
+        result = screener(case, content, reports=reports)
+    except Exception:
+        _metrics.record_screen(
+            case.target_type,
+            _metrics.OUTCOME_UNAVAILABLE,
+            seconds=_time.monotonic() - _started,
+        )
+        raise
+    _metrics.record_screen(
+        case.target_type, result.decision, seconds=_time.monotonic() - _started
+    )
+
+    # Stamped here and nowhere else: this is the one moment the module can
+    # say "the content was actually looked at". ``updated_at`` cannot answer
+    # it — a claim, a report or a severity bump moves that too — and
+    # ``tasks.rescreen_stuck_cases`` compares it against ``resubmitted_at``
+    # to decide whether an edit has outrun its last screening.
+    Case.objects.filter(pk=case.pk).update(last_screened_at=timezone.now())
+    case.refresh_from_db()
 
     excerpt_chars = int(moderation_settings.EVIDENCE_EXCERPT_CHARS)
     verdict = services.resolve_case(
@@ -243,6 +272,137 @@ def sweep_stale_cases() -> dict:
     return {"released": released, "stalled": stalled, "auto_resolved": auto_resolved}
 
 
+def rescreen_stuck_cases() -> int:
+    """Hand cases nothing else can move back to the screening ladder.
+
+    The complement of :func:`sweep_stale_cases`, which fills the human queue
+    (expired leases, stalled screenings) and never drains it. Two populations
+    end up parked there forever on a deployment whose queue is not staffed —
+    which is every deployment on day one:
+
+    * the machine **abstained** (``needs_review``) and no human came;
+    * the owner **edited** the target while its case was still open, so the
+      content changed under a case that had already been screened. Today that
+      edit produces one ``RESUBMITTED`` audit row and nothing else, because
+      ``open_case`` dedups on ``OPEN_STATES`` and ``handle_intake``
+      re-screens only from ``OPEN``.
+
+    Both are the same request — *look at this again* — so both get the same
+    answer, and it is a re-screen, never a resolution. Nothing here decides a
+    case. That distinction is the whole reason this is a second job rather
+    than a branch inside the sweep: legacy's ``retry_stuck_moderation`` swept
+    ``needs_review`` into auto-approval on the same pass that retried, and
+    published unmoderated listings for years.
+
+    Three guards keep it from becoming a billing loop:
+
+    **Backoff.** Attempt *n* waits ``RESCREEN_STUCK_AFTER * 2**n``. A case
+    that stays stuck costs four screenings over about a week, not one per
+    tick. A resubmission skips the wait — the content genuinely changed, and
+    making an owner's edit sit out an exponential window is the defect, not
+    the fix.
+
+    **Coalescing.** ``resubmitted_at`` is a timestamp, not a counter, so five
+    redeliveries of one event are one re-screen. At-least-once delivery does
+    not become at-least-once billing.
+
+    **A cap.** After ``RESCREEN_MAX_ATTEMPTS`` the case is ESCALATED: marked
+    once, logged once, and left alone. A permanently failing case has to be
+    *visible*, and a job that retries it forever is the opposite of visible —
+    it looks like work is happening.
+
+    CLAIMED cases are never touched: a moderator holding the lease outranks
+    the clock.
+    """
+    from django.db import transaction
+
+    from . import services
+    from .conf import moderation_settings
+    from .models import Case, CaseEventKind, CaseState
+
+    now = timezone.now()
+    window = int(moderation_settings.RESCREEN_STUCK_AFTER or 0)
+    cap = int(moderation_settings.RESCREEN_MAX_ATTEMPTS or 0)
+    if window <= 0 or cap <= 0:
+        return 0
+
+    started = 0
+    escalated = 0
+    # Only QUEUED. OPEN and SCREENING are the ladder's own business, CLAIMED
+    # belongs to a person, RESOLVED is done.
+    candidates = Case.objects.filter(
+        state=CaseState.QUEUED, escalated_at__isnull=True
+    ).order_by("updated_at")
+    for case_id in list(candidates.values_list("pk", flat=True)):
+        with transaction.atomic():
+            case = Case.objects.select_for_update().filter(pk=case_id).first()
+            # Re-read inside the lock: the sweep is not the only writer, and a
+            # moderator may have claimed or resolved it since the id list.
+            if case is None or case.state != CaseState.QUEUED or case.escalated_at:
+                continue
+
+            resubmitted = case.resubmitted_at is not None and (
+                case.last_screened_at is None
+                or case.resubmitted_at > case.last_screened_at
+            )
+            if case.rescreen_attempts >= cap:
+                if resubmitted:
+                    # An edit is new information, not a retry of the same
+                    # question — but the cap still holds, so say so rather
+                    # than screening past it.
+                    logger.info(
+                        "moderation: case %s was resubmitted past the re-screen "
+                        "cap; it stays queued for a human",
+                        case.id,
+                    )
+                case.escalated_at = now
+                case.save(update_fields=["escalated_at", "updated_at"])
+                services._log(
+                    case,
+                    CaseEventKind.ESCALATED,
+                    attempts=case.rescreen_attempts,
+                    reason_code="rescreen_cap_reached",
+                )
+                escalated += 1
+                continue
+
+            if not resubmitted:
+                due = case.last_screened_at or case.updated_at
+                wait = timedelta(seconds=window * (2 ** case.rescreen_attempts))
+                if due > now - wait:
+                    continue
+
+            Case.objects.filter(pk=case.pk).update(
+                rescreen_attempts=case.rescreen_attempts + 1,
+                resubmitted_at=None,
+            )
+            case.refresh_from_db()
+            services._log(
+                case,
+                CaseEventKind.RESCREENED,
+                attempt=case.rescreen_attempts,
+                reason_code="resubmitted" if resubmitted else "stuck_in_queue",
+            )
+
+        # Outside the row lock: start_screening opens its own transaction and
+        # emits, and holding a select_for_update across it would serialise the
+        # whole sweep behind one screening.
+        try:
+            services.rescan_case(case)
+            started += 1
+        except services.ModerationError:
+            logger.exception("moderation: could not re-screen stuck case %s", case.id)
+
+    if started or escalated:
+        logger.info(
+            "moderation re-screen sweep: %s case(s) sent back to the ladder, "
+            "%s escalated to a human",
+            started,
+            escalated,
+        )
+    return started
+
+
 def rearm_active_sanctions() -> dict:
     """Re-set the blacklist key for every sanction that should still bite.
 
@@ -346,6 +506,10 @@ def get_moderation_beat_schedule() -> dict:
             "task": SWEEP_TASK_NAME,
             "schedule": crontab(**dict(moderation_settings.SWEEP_SCHEDULE or {})),
         },
+        "moderation-rescreen-stuck-cases": {
+            "task": RESCREEN_TASK_NAME,
+            "schedule": crontab(**dict(moderation_settings.RESCREEN_SCHEDULE or {})),
+        },
         "moderation-rearm-sanctions": {
             "task": REARM_TASK_NAME,
             "schedule": crontab(**dict(moderation_settings.REARM_SCHEDULE or {})),
@@ -367,6 +531,7 @@ except ImportError:
     pass
 else:
     sweep_stale_cases = shared_task(name=SWEEP_TASK_NAME)(sweep_stale_cases)
+    rescreen_stuck_cases = shared_task(name=RESCREEN_TASK_NAME)(rescreen_stuck_cases)
     rearm_active_sanctions = shared_task(name=REARM_TASK_NAME)(rearm_active_sanctions)
     expire_sanctions = shared_task(name=EXPIRE_TASK_NAME)(expire_sanctions)
     purge_expired_cases = shared_task(name=PURGE_TASK_NAME)(purge_expired_cases)
@@ -377,6 +542,7 @@ __all__ = [
     "EXPIRE_TASK_NAME",
     "PURGE_TASK_NAME",
     "REARM_TASK_NAME",
+    "RESCREEN_TASK_NAME",
     "SWEEP_TASK_NAME",
     "ScreeningUnavailable",
     "apply_screening_failure",
@@ -384,6 +550,7 @@ __all__ = [
     "get_moderation_beat_schedule",
     "purge_expired_cases",
     "rearm_active_sanctions",
+    "rescreen_stuck_cases",
     "screen_case",
     "sweep_stale_cases",
 ]

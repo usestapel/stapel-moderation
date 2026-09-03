@@ -228,6 +228,7 @@ BUILTIN_REASONS: dict[str, Optional[dict]] = {
 REASON_SCREENING_UNAVAILABLE = "screening_unavailable"
 REASON_SCREENING_HELD = "screening_held"
 REASON_LOW_CONFIDENCE = "low_confidence"
+REASON_MEDIA_UNAVAILABLE = "media_unavailable"
 
 _SYSTEM_REASONS: dict[str, dict] = {
     REASON_SCREENING_UNAVAILABLE: {
@@ -243,6 +244,12 @@ _SYSTEM_REASONS: dict[str, dict] = {
         "system": True,
     },
     REASON_LOW_CONFIDENCE: {
+        "severity": 0,
+        "requires_description": False,
+        "applies_to": ["*"],
+        "system": True,
+    },
+    REASON_MEDIA_UNAVAILABLE: {
         "severity": 0,
         "requires_description": False,
         "applies_to": ["*"],
@@ -456,6 +463,7 @@ __all__ = [
     "BUILTIN_TARGET_TYPES",
     "BUILTIN_REASONS",
     "BUILTIN_RULES",
+    "REASON_MEDIA_UNAVAILABLE",
     "REASON_SCREENING_UNAVAILABLE",
     "REASON_SCREENING_HELD",
     "REASON_LOW_CONFIDENCE",

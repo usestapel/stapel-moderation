@@ -50,7 +50,9 @@ def handle_intake(event) -> None:
     from stapel_core.comm import mutate_and_emit
 
     from . import services
-    from .models import CaseEventKind, CaseOrigin, CaseState
+    from django.utils import timezone
+
+    from .models import Case, CaseEventKind, CaseOrigin, CaseState
     from .registry import resolve_policy, target_type_for_event
 
     payload = event.payload or {}
@@ -78,17 +80,27 @@ def handle_intake(event) -> None:
                 # A redelivered event, or a genuine resubmission after an
                 # edit — and **the payload cannot tell them apart**. Neither
                 # `listing.submitted` nor any other intake topic in the fleet
-                # carries a revision token, so "re-screen on every delivery"
-                # would turn an at-least-once bus into an unbounded LLM bill,
-                # and could yank a case out from under the moderator holding
-                # it. Both are audited; only a case still in OPEN (never
-                # screened) is screened here. The explicit "look again" paths
-                # are the moderator's rescan endpoint and the
-                # `moderation.submit` Function — a decision, not an omission,
-                # recorded as a delta on spec §5.3.
+                # carries a revision token, so re-screening inline on every
+                # delivery would turn an at-least-once bus into an unbounded
+                # LLM bill, and could yank a case out from under the
+                # moderator holding it.
+                #
+                # So this does not screen; it RECORDS. ``resubmitted_at`` is
+                # a timestamp rather than a counter, so five redeliveries of
+                # one event collapse into one mark, and
+                # ``tasks.rescreen_stuck_cases`` turns at most one mark per
+                # sweep into at most one screening — bounded by a cadence
+                # instead of by the bus. Without this, an owner who edited a
+                # listing whose case was already QUEUED changed the content
+                # under a verdict reached about different content, and the
+                # only trace was an audit row.
                 services._log(case, CaseEventKind.RESUBMITTED, topic=event.event_type)
                 if case.state == CaseState.OPEN:
                     services.start_screening(case, emit_event=emit_event)
+                else:
+                    Case.objects.filter(pk=case.pk).update(
+                        resubmitted_at=timezone.now()
+                    )
 
 
 #: Topics already wired to :func:`handle_intake`. Subscribing twice would

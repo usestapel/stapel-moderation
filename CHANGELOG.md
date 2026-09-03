@@ -4,6 +4,77 @@ All notable changes to stapel-moderation are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Pre-1.0 semver: **minor = breaking**, patch = compatible.
 
+## [0.6.0] — 2026-09-03
+
+### Added — a case that nothing could move now recovers
+
+`tasks.rescreen_stuck_cases`, a fifth beat job, and the thing this module was
+missing rather than a tuning of something it had. `sweep_stale_cases` returns
+expired CLAIMED leases and stalled SCREENING rows *to* the queue — it is the
+job that FILLS the human queue, and nothing drained it. On a deployment whose
+queue is not staffed, which is every deployment on day one, `needs_review`
+was a terminal state in practice: a live stand held 51 cases parked there,
+the oldest two days old, every one with `screen_attempts=3` and no path
+onward. The only setting that touched QUEUED, `AUTO_RESOLVE_STALE_QUEUE`,
+blanket-approves — the exact legacy sin this module's own docstring names —
+and it is still off, still the wrong answer, and now no longer the only one.
+
+The recovery is a re-SCREEN and never a resolution: the case goes back to the
+ladder and the ladder decides, exactly as on first submission. Three guards
+keep that from being a billing loop — exponential backoff
+(`RESCREEN_STUCK_AFTER * 2**attempts`), coalescing (a timestamp, not a
+counter), and a cap (`RESCREEN_MAX_ATTEMPTS`, default 3) past which the case
+is ESCALATED: marked once, logged once, left for a human. A permanently
+failing case has to be *visible*, and a job that retries it forever looks
+exactly like a job that is working.
+
+- `Case.last_screened_at`, `Case.resubmitted_at`, `Case.rescreen_attempts`,
+  `Case.escalated_at` (migration `0004`, additive and nullable).
+- `CaseEventKind.RESCREENED` and `CaseEventKind.ESCALATED`.
+- `RESCREEN_STUCK_AFTER` (3600), `RESCREEN_MAX_ATTEMPTS` (3),
+  `RESCREEN_SCHEDULE` (`*/15`).
+- `RESCREEN_TASK_NAME` joins `BEAT_TASK_NAMES`, so `moderation.W004` names it
+  when a host has not scheduled it.
+
+### Fixed — an edit to a queued listing was never looked at
+
+`open_case` dedups on `OPEN_STATES`, so an owner editing a listing whose case
+was still QUEUED found the existing case; `handle_intake` re-screened only
+from OPEN. The edit therefore changed the content underneath a verdict that
+had been reached about *different* content, and the sole trace was a
+`RESUBMITTED` audit row.
+
+`handle_intake` now stamps `resubmitted_at` and `rescreen_stuck_cases` acts
+on it, skipping the stuck window — an edit is new information, not a retry of
+the same question. Deliberately not an inline re-screen: the payload cannot
+tell a redelivery from an edit, and stamping a timestamp means five
+redeliveries of one event collapse into one screening bounded by the beat
+cadence rather than by the bus. A CLAIMED case is never touched; a moderator
+holding the lease outranks the clock.
+
+### Fixed — a screening that saw no photo no longer reports as a screening
+
+`moderation.W007` catches the deployment that could never resolve a variant
+URL. This is the row-level half, and it was still live on a stand where W007
+was satisfied and `MEDIA_BASE_URL` was set: the listing carried media refs,
+`cdn.describe` answered `LookupError` for every one of them, `_media_images`
+returned `[]`, the `if images:` guard quietly omitted the key, and the model
+approved the listing on the strength of its title. Measured, not theorised —
+six of twelve sampled live listings resolved, six did not, and all twelve got
+a verdict that read as fully screened.
+
+`run_llm` now abstains when a target declares media and **none** of it can be
+resolved: `needs_review` / `media_unavailable`, which routes to the human
+queue that is already this module's answer to "cannot screen". Dropping one
+ref of several is still right and still happens — the text and the other
+photos are real. Dropping all of them is a different sentence.
+
+Not a `ScreeningUnavailable`: unresolvable refs will not resolve on the next
+attempt either, so the retry ladder would spend three attempts to arrive in
+the same place.
+
+- `registry.REASON_MEDIA_UNAVAILABLE`.
+
 ## [0.5.1] — 2026-09-03
 
 ### Added

@@ -394,6 +394,10 @@
       "kind": "factory",
       "intent": "Return expired claims and stalled screenings to the queue. Never renders a verdict — that is the whole difference from the predecessor system's stale sweeper."
     },
+    "rescreen_stuck_cases": {
+      "kind": "factory",
+      "intent": "Hand cases nothing else can move — the machine abstained, or the owner edited the target while its case was still open — back to the screening ladder, with exponential backoff and a cap that surfaces a permanently failing case instead of retrying it forever. Re-screens; never decides."
+    },
     "rearm_active_sanctions": {
       "kind": "factory",
       "intent": "Re-set the enforcement key for every sanction that should still bite. Without it a long suspension silently stops being enforced when the cache key expires."

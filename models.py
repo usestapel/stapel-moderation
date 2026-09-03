@@ -149,6 +149,8 @@ class CaseEventKind(models.TextChoices):
     APPEALED = "appealed", "Appealed"
     REOPENED = "reopened", "Reopened"
     NOTIFIED = "notified", "Notification requested"
+    RESCREENED = "rescreened", "Re-screened by the stuck sweep"
+    ESCALATED = "escalated", "Given up on by the machine, left for a human"
 
 
 class SanctionKind(models.TextChoices):
@@ -241,6 +243,29 @@ class Case(models.Model):
     #: The comm TaskRecord id of the in-flight screening, for operators.
     screen_task_id = models.UUIDField(null=True, blank=True)
     screen_attempts = models.PositiveIntegerField(default=0)
+
+    #: When a verdict was last recorded for this case. Distinct from
+    #: ``updated_at``, which any write moves — a claim, a report, a severity
+    #: bump — and therefore cannot answer "when did anyone last LOOK at this".
+    last_screened_at = models.DateTimeField(null=True, blank=True)
+    #: When the target was last re-submitted while this case was still open.
+    #: An owner editing a listing whose case sits in the queue produces
+    #: exactly this and nothing else today: ``open_case`` dedups on
+    #: ``OPEN_STATES`` and returns the existing case, so the edited content
+    #: is never looked at. Compared against ``last_screened_at`` by
+    #: ``tasks.rescreen_stuck_cases``, which is what makes an edit
+    #: re-trigger moderation — and, because many resubmissions collapse into
+    #: one timestamp, what keeps at-least-once delivery from being
+    #: at-least-once billing.
+    resubmitted_at = models.DateTimeField(null=True, blank=True)
+    #: Automatic re-screens the stuck sweep has spent on this case. The
+    #: backoff exponent and the give-up counter, in one number.
+    rescreen_attempts = models.PositiveSmallIntegerField(default=0)
+    #: Set once, when the sweep has spent its cap and stops. NOT a decision:
+    #: the case stays QUEUED and a human still owes it a verdict. It is the
+    #: field a queue filter sorts on so that "the machine gave up" is a
+    #: readable state rather than the indistinguishable silence it is today.
+    escalated_at = models.DateTimeField(null=True, blank=True, db_index=True)
 
     class Meta:
         db_table = "moderation_case"

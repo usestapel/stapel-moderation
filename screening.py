@@ -343,6 +343,45 @@ def run_llm(case, content, *, reports=()) -> ScreeningResult:
         images = _media_images(content)
         if images:
             payload["images"] = images
+        elif content.media:
+            # The target HAS photos and not one of them could be turned into
+            # something a model can look at. W007 catches the deployment that
+            # could never resolve a variant URL; this is the row-level half,
+            # and it was still live on a stand where W007 was satisfied — the
+            # refs themselves did not resolve (`cdn.describe` answered
+            # LookupError for every one), `_media_images` returned `[]`, the
+            # `if images:` above quietly omitted the key, and the model
+            # approved a listing on the strength of its title.
+            #
+            # Dropping ONE ref of several is still right: the text and the
+            # other photos are real, and a partial view is a view. Dropping
+            # ALL of them is a different sentence — this screening did not
+            # happen — and a screener that cannot see what it was asked about
+            # must abstain rather than answer. Abstaining routes it to the
+            # human queue, which is already this module's answer to "cannot
+            # screen" (ON_SCREENING_FAILURE="hold"). It is deliberately NOT a
+            # ScreeningUnavailable: unresolvable refs will not resolve on the
+            # next attempt either, so the retry ladder would spend three
+            # attempts to reach the same place.
+            from .registry import REASON_MEDIA_UNAVAILABLE
+
+            logger.warning(
+                "moderation: case %s declares %s media ref(s) and none could be "
+                "resolved for screening — abstaining rather than judging the "
+                "text alone",
+                case.id,
+                len(tuple(content.media)),
+            )
+            return ScreeningResult(
+                decision=VerdictDecision.NEEDS_REVIEW,
+                source=VerdictSource.POLICY_DEFAULT,
+                reason_code=REASON_MEDIA_UNAVAILABLE,
+                rationale=(
+                    "The listing's photos could not be retrieved, so only its "
+                    "text could be checked automatically."
+                ),
+                media_flags=tuple(str(ref) for ref in content.media),
+            )
 
     # Level 1: the transport itself.
     try:

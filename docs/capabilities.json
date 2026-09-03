@@ -1,6 +1,6 @@
 {
   "module": "stapel-moderation",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "provides": "The fleet's single producer of moderation verdicts: one target-generic queue over listings, reviews, chat messages and profiles, keyed by an opaque (target_type, target_key) and driven by a host-registered policy per type. One Case per target however many people complain, one status vocabulary in the whole module, an append-only Verdict and an append-only CaseEvent audit trail whose mutations are FORBIDDEN by mandate declaration. Screening is a comm-Task (deterministic rules, then schema-constrained llm.complete) with a closed hold-for-a-human default when the automation cannot answer. Resolution ACTS on the target by emitting moderation.completed, which stapel-listings and stapel-reviews already consume. Sanctions carry a kind, a scope, a reason, a clock, an appeal and an audit trail, and they bite through core's cross-service user blacklist — the hook every request path already checked and nobody had ever called. Plus DSA artefacts generated from the registries: a public policy disclosure, a statement of reasons on every takedown, an acknowledgement to every complainant, and an internal appeal heard by a different moderator.",
   "axes": [
     {
@@ -604,6 +604,12 @@
       "kind": "factory",
       "path": "stapel_moderation.tasks.rearm_active_sanctions",
       "intent": "Re-set the enforcement key for every sanction that should still bite. Without it a long suspension silently stops being enforced when the cache key expires."
+    },
+    {
+      "name": "rescreen_stuck_cases",
+      "kind": "factory",
+      "path": "stapel_moderation.tasks.rescreen_stuck_cases",
+      "intent": "Hand cases nothing else can move — the machine abstained, or the owner edited the target while its case was still open — back to the screening ladder, with exponential backoff and a cap that surfaces a permanently failing case instead of retrying it forever. Re-screens; never decides."
     },
     {
       "name": "screen_case",

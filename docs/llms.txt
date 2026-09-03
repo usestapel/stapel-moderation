@@ -1,8 +1,8 @@
-# stapel-moderation 0.5.1
+# stapel-moderation 0.6.0
 
 The fleet's single producer of moderation verdicts: one target-generic queue over listings, reviews, chat messages and profiles, keyed by an opaque (target_type, target_key) and driven by a host-registered policy per type. One Case per target however many people complain, one status vocabulary in the whole module, an append-only Verdict and an append-only CaseEvent audit trail whose mutations are FORBIDDEN by mandate declaration. Screening is a comm-Task (deterministic rules, then schema-constrained llm.complete) with a closed hold-for-a-human default when the automation cannot answer. Resolution ACTS on the target by emitting moderation.completed, which stapel-listings and stapel-reviews already consume. Sanctions carry a kind, a scope, a reason, a clock, an appeal and an audit trail, and they bite through core's cross-service user blacklist — the hook every request path already checked and nobody had ever called. Plus DSA artefacts generated from the registries: a public policy disclosure, a statement of reasons on every takedown, an acknowledgement to every complainant, and an internal appeal heard by a different moderator.
 
-Contract: axes 11 · surface 60 · extension points 6 · operations 18 · error codes 70.
+Contract: axes 11 · surface 61 · extension points 6 · operations 18 · error codes 70.
 Generated from docs/capabilities.json by `stapel-llms-txt` — do not edit; drift-gated by `make contract-check`.
 
 ## Configuration axes — what a product switches on
@@ -149,6 +149,8 @@ This is the answer to "does Stapel already have something for X?". `instead of` 
   Hand a claimed case back to the queue and audit the release.
 - rescan_case — stapel_moderation.services.rescan_case
   Send a case back through the automatic screener, reopening it first if it was already decided — the explicit 'look again' path.
+- rescreen_stuck_cases — stapel_moderation.tasks.rescreen_stuck_cases
+  Hand cases nothing else can move — the machine abstained, or the owner edited the target while its case was still open — back to the screening ladder, with exponential backoff and a cap that surfaces a permanently failing case instead of retrying it forever. Re-screens; never decides.
 - reset_reasons — stapel_moderation.registry.reset_reasons
   Tests only: drop runtime reason overrides.
 - reset_registries — stapel_moderation.registry.reset_registries
