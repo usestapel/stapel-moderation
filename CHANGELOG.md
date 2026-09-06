@@ -118,7 +118,12 @@ in the same service and the named provider's key is empty there.
 ### Added
 
 * `CaseState.DLQ`, `HUMAN_QUEUE_STATES`, and the `dlq_at` /
-  `last_error_class` / `last_error` columns (migration `0005`).
+  `last_error_class` / `last_error` columns (migration `0005`). Migration
+  `0006` rebuilds `uniq_open_case_per_target` so `dlq` counts as an open
+  state — a dead-lettered case is still THE case for its target, and a
+  redelivery must not open a twin beside it. That is a partial-index rebuild
+  and takes a brief exclusive lock on `moderation_case`; the migration says
+  so.
 * `CaseEventKind.DEAD_LETTERED` / `REVIVED`.
 * `services.dead_letter_case`, `services.close_subject_gone`,
   `services.target_is_addressable`, `services.error_class_of`,
