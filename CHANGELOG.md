@@ -4,6 +4,42 @@ All notable changes to stapel-moderation are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Pre-1.0 semver: **minor = breaking**, patch = compatible.
 
+## [0.7.2] — 2026-09-06
+
+### A rescreen nobody was watching, and a card that read the audit log
+
+Two follow-ups from the stand that ran 0.7.0's dead-letter park.
+
+**`manage.py moderation_rescreen` dispatches instead of screening.** The
+command is typed into `docker compose run --rm web manage.py …` — a one-off
+container that no Prometheus scrapes and that exits the moment the command
+returns. Every screening it ran there wrote its duration, its outcome and its
+`moderation_screen_failures_total` increments into a process nobody was
+looking at, so a manual rescreen of a park could fail from end to end and the
+DLQ alert built on those counters would not move. Each case now goes onto the
+worker as a `moderation.screen` comm task — the same path the ladder and the
+beat sweep use — and the command reports how many were **dispatched**, which
+is the only thing it is now in a position to know.
+
+`--sync` keeps the old behaviour as an explicit debug flag: it screens in this
+process, and it says in its own output that those outcomes are unobserved. And
+because a deployment configured with `TASK_DISPATCH`/`TASK_EXECUTOR` inline
+runs the screening in this container regardless of which flag was typed, the
+command now says so rather than printing "dispatched" over work it just did
+itself. `--dry-run` is unchanged.
+
+**The case card carries the dead-letter stamps.** `dlq_at`,
+`last_error_class`, `last_error` and `escalated_at` are on
+`CaseDetailPresenter` now, with the same values and help text as the queue
+row. 0.7.0 put them on the summary only, on the reasoning that the DLQ tab is
+a list view — which is true and was not enough: a console that lands on the
+card from that tab had to read the `dead_lettered` **audit event** to render
+which seam broke. That is history standing in for state, it says nothing once
+the case is revived (the event stays, the stamps clear), and it made a
+rendered field depend on an append-only log whose shape is a compliance
+artefact rather than an API. No migration: the columns have existed since
+0.7.0's `0005_case_dead_letter`.
+
 ## [0.7.1] — 2026-09-06
 
 ### `stapel-core` floor raised to 0.60.0 — the retry ladder this module relies on

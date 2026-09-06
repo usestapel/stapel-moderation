@@ -379,6 +379,10 @@ class CaseDetailPresenter(Presenter):
             "created_at": "2026-08-21T10:00:00+00:00",
             "updated_at": "2026-08-21T10:05:00+00:00",
             "resolved_at": null,
+            "dlq_at": null,
+            "last_error_class": "",
+            "last_error": "",
+            "escalated_at": null,
             "reports": [],
             "verdicts": [],
             "sanctions": [],
@@ -419,6 +423,41 @@ class CaseDetailPresenter(Presenter):
         "updated_at": PresenterField(type=str, source=lambda dao: dao.updated_at.isoformat()),
         "resolved_at": PresenterField(
             type=Optional[str], source=lambda dao: _iso(dao.resolved_at), default=None
+        ),
+        # The same dead-letter stamps the summary row carries, with the same
+        # values. They are on the card because the card is where an engineer
+        # lands from the DLQ tab, and a card that omits them left the console
+        # reading the `dead_lettered` AUDIT EVENT to render "what broke" —
+        # deriving a rendered field from the audit trail, which is append-only
+        # history, not the case's current state, and which says nothing at all
+        # once the case is revived.
+        "dlq_at": PresenterField(
+            type=Optional[str],
+            source=lambda dao: _iso(dao.dlq_at),
+            default=None,
+            help_text="When screening gave up on this case. Null unless state is dlq.",
+        ),
+        "last_error_class": PresenterField(
+            type=str,
+            source=lambda dao: dao.last_error_class or "",
+            default="",
+            help_text=(
+                "Class of the last screening failure - ContentUnavailable, "
+                "ScreeningUnavailable, TargetNotFound, other. Closed vocabulary; "
+                "the same value the queue row carries."
+            ),
+        ),
+        "last_error": PresenterField(
+            type=str,
+            source=lambda dao: dao.last_error or "",
+            default="",
+            help_text="The last failure's message, truncated. For a human to read.",
+        ),
+        "escalated_at": PresenterField(
+            type=Optional[str],
+            source=lambda dao: _iso(dao.escalated_at),
+            default=None,
+            help_text="Set when the automatic re-screen sweep spent its cap and stopped.",
         ),
         "reports": PresenterField(
             type=ReportPresenter, many=True, source=lambda dao: dao.reports.all()

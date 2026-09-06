@@ -291,6 +291,43 @@ def test_the_card_shows_reports_verdicts_and_the_audit_trail(
     assert "created" in kinds and "verdict" in kinds
 
 
+def test_the_card_carries_the_dead_letter_stamps(content_double, llm_double, lead_client):
+    """The card says what broke, in the same fields the queue row uses.
+
+    Without them the console had to read the ``dead_lettered`` AUDIT EVENT to
+    render "which seam broke" — history standing in for state, which stops
+    being true the moment the case is revived.
+    """
+    case = _queued(llm_double)
+    services.dead_letter_case(
+        case, error="llm.complete unreachable", error_class="ScreeningUnavailable"
+    )
+
+    card = lead_client.get(f"{BASE}/cases/{case.id}")
+    assert card.status_code == 200
+    assert card.data["last_error_class"] == "ScreeningUnavailable"
+    assert card.data["last_error"] == "llm.complete unreachable"
+    assert card.data["dlq_at"] is not None
+    assert card.data["escalated_at"] is None
+    # The same values the list row carries, not a second rendering of them.
+    row = lead_client.get(f"{BASE}/cases?state=dlq").data[0]
+    for field in ("dlq_at", "last_error_class", "last_error", "escalated_at"):
+        assert card.data[field] == row[field]
+
+
+def test_a_case_that_never_failed_carries_the_stamps_empty(
+    content_double, llm_double, lead_client
+):
+    """Declared and null — never an absent key a client has to guess about."""
+    case = _queued(llm_double)
+
+    card = lead_client.get(f"{BASE}/cases/{case.id}")
+    assert card.data["dlq_at"] is None
+    assert card.data["escalated_at"] is None
+    assert card.data["last_error_class"] == ""
+    assert card.data["last_error"] == ""
+
+
 def test_the_audit_endpoint_is_read_only_by_route(content_double, llm_double, lead_client):
     """There is no write route to the audit log — not even a wrong one."""
     case = _queued(llm_double)

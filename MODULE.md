@@ -240,7 +240,11 @@ of the photos and answering about all of them.
 - **`TASK_DISPATCH` must not be `"inline"` in production.** Inline runs
   screening inside the web request. A composite wants `"action"` or `"bus"`,
   and the stand should prove `task.requested` actually reaches a worker
-  outside the web process before a queue is built on it.
+  outside the web process before a queue is built on it. It also decides
+  whether a manual `manage.py moderation_rescreen` is *observed*: the command
+  dispatches to the worker precisely because a one-off `docker compose run`
+  container is scraped by nothing, and an inline setting cancels that (the
+  command says so when it detects one).
 - **Media screening is billed per case.** Image prompts disable the
   provider's prompt cache, so cost is linear in submissions. `policy["media"]`
   and `MAX_MEDIA_PER_CASE` are the controls; screening media only on
