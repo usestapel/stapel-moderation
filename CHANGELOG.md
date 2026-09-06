@@ -144,6 +144,25 @@ in the same service and the named provider's key is empty there.
   operator's button for "the seam is repaired, empty the park", and the way
   pre-0.7.0 screening-failure cases are moved.
 
+### Test harness: the retry ladder stopped driving itself
+
+stapel-core 0.60.0 made the Task retry ladder WAIT — a failed attempt sets
+`not_before = now + backoff` and `execute()` declines to claim the record
+until it passes, with the taskstore sweep re-announcing it when it comes
+due. Correct, and measured: the old ladder fired three attempts at an
+unreachable provider inside 0.87 seconds.
+
+This module's tests of the failure path assumed the old behaviour, where one
+`start()` drove the ladder all the way to its FAILED park inside the call.
+Under 0.60 the task sat PENDING at `attempts=1` and every assertion about
+the park read a case still in `screening`. The suite's settings now set
+`STAPEL_COMM["TASK_RETRY_BACKOFF_BASE"] = 0` — core's own documented answer
+for a single-process runner — which disables the WAIT and nothing else.
+
+**A deployment must not copy that line.** It needs the backoff, and it needs
+`get_taskstore_beat_schedule()` in its beat schedule or the held retries are
+never re-announced at all; `taskstore.W001` says so at boot.
+
 ### Not done, deliberately
 
 Migration `0005` rewrites no existing verdict. An append-only audit trail

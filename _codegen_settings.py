@@ -113,6 +113,30 @@ def settings_kwargs(
             # actually leaves the web process — spec §18.3.
             "TASK_DISPATCH": "inline",
             "TASK_EXECUTOR": "inline",
+            # …and synchronously means the RETRIES too, which stopped being
+            # automatic in stapel-core 0.60.0. Before it, a failed attempt
+            # was re-announced and re-executed immediately, so one `start()`
+            # drove the whole ladder to its FAILED park inside the call —
+            # which is what every test of the failure path here asserts.
+            #
+            # 0.60.0 made the ladder WAIT (rightly: it was measured firing
+            # three attempts against an unreachable provider inside 0.87
+            # seconds). A retry now sets `not_before = now + backoff` and
+            # `execute()` declines to claim the record until it passes; the
+            # taskstore sweep re-announces it when it comes due. In a test
+            # nothing sweeps, so the task sat PENDING at attempts=1 and every
+            # assertion about the park read a case still in `screening`.
+            #
+            # `base=0` is core's own documented answer for this — "the
+            # configuration a test or a single-process script wants"
+            # (comm/backoff.py) — and it disables only the WAIT. The ladder,
+            # the cap and the park are exercised exactly as shipped. A
+            # deployment must not copy this line: without a backoff, three
+            # attempts land on a struggling provider in one second, and
+            # without the taskstore sweep in its beat schedule the held
+            # retries are never re-announced at all (stapel-core prints
+            # `taskstore.W001` when that is missing).
+            "TASK_RETRY_BACKOFF_BASE": 0,
         },
         MIGRATION_MODULES={
             "users": None,
