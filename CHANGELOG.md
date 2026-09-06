@@ -4,6 +4,20 @@ All notable changes to stapel-moderation are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Pre-1.0 semver: **minor = breaking**, patch = compatible.
 
+## [0.7.1] — 2026-09-06
+
+### `stapel-core` floor raised to 0.60.0 — the retry ladder this module relies on
+
+The screening retry ladder depends on core 0.60.0's Task retry ladder WAIT
+semantics: a failed attempt sets `not_before = now + backoff` and
+`execute()` declines to reclaim the record until it passes, with the
+taskstore sweep re-announcing it when due, rather than the old ladder
+driving all three attempts inside one `start()` call. This is exactly the
+behaviour 0.7.0's own test harness note documents
+(`STAPEL_COMM["TASK_RETRY_BACKOFF_BASE"]`) — the floor was simply stating a
+version where that ladder does not wait. Floor-only; no behaviour here
+changes.
+
 ## [0.7.0] — 2026-09-06
 
 ### A failure is not a verdict

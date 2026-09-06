@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stapel-moderation"
-version = "0.7.0"
+version = "0.7.1"
 description = "Target-generic moderation queue: reports, verdicts, sanctions and appeals for the Stapel framework"
 readme = "README.md"
 license = { text = "MIT" }
@@ -34,7 +34,14 @@ dependencies = [
     # to the human queue. The prompt-injection sanitizer is the one thing
     # imported from it, lazily and inside the default screener, because the
     # screener is a replaceable seam rather than a hard edge.
-    "stapel-core>=0.43.0,<1.0",
+    #
+    # Floor 0.60.0: the screening retry ladder relies on the Task retry
+    # ladder's WAIT semantics — a failed attempt sets `not_before = now +
+    # backoff` and `execute()` declines to reclaim the record until it
+    # passes, with the taskstore sweep re-announcing it when due. The test
+    # harness documents the opt-out (`STAPEL_COMM["TASK_RETRY_BACKOFF_BASE"]
+    # = 0`, single-process runners only — see CHANGELOG 0.7.0).
+    "stapel-core>=0.60.0,<1.0",
 ]
 
 [project.urls]
