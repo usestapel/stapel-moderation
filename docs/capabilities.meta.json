@@ -438,6 +438,26 @@
       "instead_of": [
         "Report.objects.filter(...).first().evidence"
       ]
+    },
+    "dead_letter_case": {
+      "kind": "factory",
+      "intent": "Park a case whose SCREENING kept failing in the dlq state, carrying the class of the last error. Use when a seam broke, never when a screener judged: a failure records no verdict and stays out of the human queue.",
+      "instead_of": [
+        "recording a policy_default needs_review verdict when the screener never answered",
+        "leaving a broken case in the moderator queue where it looks like work"
+      ]
+    },
+    "close_subject_gone": {
+      "kind": "factory",
+      "intent": "Resolve a case whose subject cannot be addressed or no longer exists as dismissed / subject_gone, suppressing the verdict event when the key is synthetic. Use instead of re-screening a target nobody owns."
+    },
+    "target_is_addressable": {
+      "kind": "factory",
+      "intent": "Ask whether a case's target_key can be handed to a content function at all — false for a draft case's synthetic draft:<uuid>. Check it before screening rather than discovering it as a remote LookupError."
+    },
+    "error_class_of": {
+      "kind": "factory",
+      "intent": "Clamp an exception or its name to the closed error-class vocabulary the DLQ tab groups by and the metrics label with. Use so a provider's stack trace never becomes a Prometheus series."
     }
   }
 }

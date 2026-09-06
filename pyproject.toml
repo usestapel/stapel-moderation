@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stapel-moderation"
-version = "0.6.3"
+version = "0.7.0"
 description = "Target-generic moderation queue: reports, verdicts, sanctions and appeals for the Stapel framework"
 readme = "README.md"
 license = { text = "MIT" }
@@ -49,7 +49,15 @@ all = []
 
 [tool.setuptools]
 package-dir = {"stapel_moderation" = "."}
-packages = ["stapel_moderation", "stapel_moderation.migrations"]
+packages = [
+    "stapel_moderation",
+    "stapel_moderation.migrations",
+    # `manage.py moderation_rescreen` — the operator's button for "the seam is
+    # repaired, empty the park". A management command that ships repo-only is
+    # a command nobody on a stand can run, which is the only place it matters.
+    "stapel_moderation.management",
+    "stapel_moderation.management.commands",
+]
 
 [tool.setuptools.package-data]
 # The contract documents ship IN THE WHEEL: that is what makes

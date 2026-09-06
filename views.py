@@ -345,7 +345,13 @@ class AppealListCreateView(SerializerSeamMixin, APIView):
 
 @extend_schema(tags=["Moderation / queue"])
 class CaseListView(SerializerSeamMixin, APIView):
-    """One keyset page of the cross-target queue."""
+    """One keyset page of the cross-target queue.
+
+    ``?state=dlq`` is the dead-letter tab — cases the screening seam gave up
+    on, which are emphatically NOT the human queue (``?state=queued``). A
+    console that shows them together tells a moderator there is work where
+    there is an outage; ``/stats`` counts them apart for the same reason.
+    """
 
     mandate_action = "queue.view"
     permission_classes = [HasModerationMandate.for_action("queue.view")]
@@ -364,6 +370,7 @@ class CaseListView(SerializerSeamMixin, APIView):
             severity_min=data.get("severity_min"),
             scope_key=data.get("scope_key") or "",
             subject_user_id=data.get("subject_user_id"),
+            error_class=data.get("error_class") or "",
             before=data.get("before"),
             limit=data.get("limit"),
         )
@@ -523,7 +530,13 @@ class CaseVerdictView(SerializerSeamMixin, APIView):
 
 @extend_schema(tags=["Moderation / queue"])
 class CaseRescanView(SerializerSeamMixin, APIView):
-    """Send a case back through the automatic screener."""
+    """Send a case back through the automatic screener.
+
+    Also the way out of the dead-letter park: a case in ``dlq`` is revived and
+    put back on the ladder, so repairing the seam and emptying the DLQ tab is
+    one action per case (or one management command for all of them —
+    ``manage.py moderation_rescreen --state dlq``).
+    """
 
     mandate_action = "case.rescan"
     permission_classes = [HasModerationMandate.for_action("case.rescan")]

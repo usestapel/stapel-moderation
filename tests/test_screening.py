@@ -80,13 +80,21 @@ def test_llm_unknown_decision_raises(content_double, llm_double):
         run_llm(case, content)
 
 
-def test_task_retries_to_exhaustion_then_holds(content_double, llm_double, settings):
-    """Assertion 4 end to end: retried, parked, and then HELD for a human.
+def test_task_retries_to_exhaustion_then_dead_letters(
+    content_double, llm_double, settings
+):
+    """Assertion 4 end to end: retried, parked, and then DEAD-LETTERED.
 
     Three attempts (the default ladder), a FAILED task record, and a case in
-    the human queue carrying a ``needs_review`` verdict that names
-    ``screening_unavailable`` — not a published listing, which is what legacy
-    produced roughly thirty minutes after its LLM went down.
+    ``dlq`` carrying the class of what broke — not a published listing, which
+    is what legacy produced roughly thirty minutes after its LLM went down,
+    and **not a verdict**, which is what this module produced until 0.7.0.
+
+    The verdict is the assertion that matters here. ``needs_review /
+    policy_default`` said "the machine considered this and wants a person" on
+    a code path where no machine considered anything; it went into the human
+    queue, into DSA Art. 17 statements of reasons, and into a client stand's
+    verdict table 567 times without one of them being a judgement.
     """
     llm_double["envelope"] = {"status": "failure", "reason": "provider down"}
 
@@ -101,13 +109,82 @@ def test_task_retries_to_exhaustion_then_holds(content_double, llm_double, setti
     assert task.attempts == 3
 
     case.refresh_from_db()
-    assert case.state == CaseState.QUEUED
+    assert case.state == CaseState.DLQ
+    assert case.dlq_at is not None
+    assert case.last_error_class == "ScreeningUnavailable"
+    assert "provider down" in case.last_error
 
-    verdict = case.verdicts.get()
-    assert verdict.decision == VerdictDecision.NEEDS_REVIEW
-    assert verdict.source == VerdictSource.POLICY_DEFAULT
-    assert verdict.reason_code == "screening_unavailable"
+    assert not case.verdicts.exists(), "a failure is not a verdict"
     assert case.events.filter(kind="screen_failed").exists()
+    assert case.events.filter(kind="dead_lettered").exists()
+
+
+def test_a_dead_letter_is_not_in_the_human_queue(content_double, llm_double):
+    """The whole point of the state: ``?state=queued`` must not show it.
+
+    A console that mixes the two tells a moderator there is work where there
+    is an outage — which is how a 78% screening failure rate looked like a
+    busy queue for twelve days.
+    """
+    llm_double["envelope"] = {"status": "failure", "reason": "provider down"}
+
+    case = _open_case()
+    from stapel_core.comm import mutate_and_emit
+
+    with mutate_and_emit() as emit_event:
+        services.start_screening(case, emit_event=emit_event)
+
+    case.refresh_from_db()
+    assert case.state == CaseState.DLQ
+
+    assert services.list_cases(state=CaseState.QUEUED) == []
+    assert [row.pk for row in services.list_cases(state=CaseState.DLQ)] == [case.pk]
+    assert [
+        row.pk
+        for row in services.list_cases(
+            state=CaseState.DLQ, error_class="ScreeningUnavailable"
+        )
+    ] == [case.pk]
+    assert services.list_cases(state=CaseState.DLQ, error_class="ContentUnavailable") == []
+
+    stats = services.queue_stats()
+    assert stats["dlq_total"] == 1
+    assert stats["queue_total"] == 0
+    assert stats["dlq_by_error_class"] == {"ScreeningUnavailable": 1}
+
+
+def test_rescan_revives_a_dead_letter_when_the_seam_is_healthy(
+    content_double, llm_double
+):
+    """The park is not a grave: one call puts it back on the ladder."""
+    llm_double["envelope"] = {"status": "failure", "reason": "provider down"}
+
+    case = _open_case()
+    from stapel_core.comm import mutate_and_emit
+
+    with mutate_and_emit() as emit_event:
+        services.start_screening(case, emit_event=emit_event)
+
+    case.refresh_from_db()
+    assert case.state == CaseState.DLQ
+
+    # The proxy comes back.
+    llm_double["envelope"] = {
+        "status": "ok",
+        "result": {
+            "decision": "approved",
+            "reason_code": "",
+            "rationale": "Nothing objectionable.",
+            "confidence": 0.9,
+        },
+    }
+    services.rescan_case(case)
+
+    case.refresh_from_db()
+    assert case.state == CaseState.RESOLVED
+    assert case.dlq_at is None
+    assert case.last_verdict.decision == VerdictDecision.APPROVED
+    assert case.events.filter(kind="revived").exists()
 
 
 # ── Assertion 5: the confession switch ───────────────────────────────

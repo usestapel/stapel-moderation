@@ -455,11 +455,98 @@ def check_screen_draft_timeout(app_configs, **kwargs):
         )
     ]
 
+
+@checks.register(checks.Tags.compatibility)
+def check_llm_provider(app_configs, **kwargs):
+    """E009/W009: screening routed to a provider nobody gave credentials to.
+
+    ``llm.complete`` is called by NAME over comm and executes wherever the
+    agent lives — on a fleet, in a different container, reading a different
+    settings file. So there are two places a provider can be named: the
+    agent's own ``DEFAULT_PROVIDER``, and ``STAPEL_MODERATION['LLM_PROVIDER']``
+    here, which overrides it per call. When those disagree, screening routes
+    to a provider whose credentials are configured for nobody, the agent
+    answers ``{"status": "failure", "reason": "<X> API key not configured"}``,
+    and this module — correctly, and uselessly — turns that into a retry.
+
+    Measured on a client stand: eight screenings failed with *"Anthropic API
+    key not configured — set STAPEL_AGENT['ANTHROPIC_API_KEY']"* while the
+    fleet was configured for an OpenAI-compatible endpoint. The failure was
+    perfectly logged and perfectly invisible: it looked exactly like the
+    provider outage running next to it.
+
+    **One config or none.** The shipped value is ``""`` — do not name a
+    provider here, and screening goes wherever the agent is already
+    configured to go, which is a single source of truth by construction.
+    Naming one is a deliberate second source and gets W009.
+
+    E009 is the case this process can actually PROVE: the agent runs in this
+    same service, its settings are readable, and the provider named here has
+    no credentials in them. Where the agent is a separate service — the
+    normal fleet shape — nothing here can see its keys, which is precisely
+    why not naming a provider is the recommendation rather than a preference.
+    """
+    from .conf import moderation_settings
+
+    named = str(moderation_settings.LLM_PROVIDER or "").strip()
+    if not named:
+        return []
+
+    from django.conf import settings as django_settings
+
+    agent = getattr(django_settings, "STAPEL_AGENT", None)
+    if not isinstance(agent, dict):
+        return [checks.Warning(
+            f"STAPEL_MODERATION['LLM_PROVIDER'] = {named!r} is sent on every "
+            "llm.complete call and overrides whatever provider the agent "
+            "service is configured with. The agent does not run in this "
+            "process, so nothing here can check that provider has "
+            "credentials — if it does not, every screening fails with a "
+            "'not configured' envelope that reads exactly like an outage.",
+            hint="Leave STAPEL_MODERATION['LLM_PROVIDER'] empty (the shipped "
+                 "default) so the agent's own DEFAULT_PROVIDER decides, and "
+                 "the fleet has one place a provider is named.",
+            id="stapel_moderation.W009",
+        )]
+
+    default = str(agent.get("DEFAULT_PROVIDER") or "").strip()
+    key_names = {
+        "anthropic": "ANTHROPIC_API_KEY",
+        "openai-compat": "OPENAI_COMPAT_API_KEY",
+    }
+    key_name = key_names.get(named)
+    if key_name and not str(agent.get(key_name) or "").strip():
+        return [checks.Error(
+            f"STAPEL_MODERATION['LLM_PROVIDER'] = {named!r}, but "
+            f"STAPEL_AGENT['{key_name}'] is empty in this same service. Every "
+            "screening will fail with a 'not configured' envelope, be retried "
+            "to exhaustion and be dead-lettered — the agent's own W016 will "
+            f"NOT catch it, because its DEFAULT_PROVIDER is {default!r} and "
+            "that is not the provider screening asks for.",
+            hint=f"Either give {named!r} its key, or drop "
+                 "STAPEL_MODERATION['LLM_PROVIDER'] so screening follows "
+                 "STAPEL_AGENT['DEFAULT_PROVIDER'].",
+            id="stapel_moderation.E009",
+        )]
+    if default and default != named:
+        return [checks.Warning(
+            f"STAPEL_MODERATION['LLM_PROVIDER'] = {named!r} disagrees with "
+            f"STAPEL_AGENT['DEFAULT_PROVIDER'] = {default!r}. Screening will "
+            "route somewhere nothing else in this service routes, which is a "
+            "second provider to keep credentialed, priced and reachable.",
+            hint="Leave STAPEL_MODERATION['LLM_PROVIDER'] empty unless the "
+                 "split is deliberate.",
+            id="stapel_moderation.W009",
+        )]
+    return []
+
+
 __all__ = [
     "check_anonymous_reports",
     "check_auto_resolve",
     "check_beat_schedule",
     "check_gdpr_declaration",
+    "check_llm_provider",
     "check_media_transport",
     "check_screen_draft_timeout",
     "check_notification_types",

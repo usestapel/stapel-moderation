@@ -86,7 +86,11 @@ class CasePresenter(Presenter):
             "first_reported_at": "2026-08-21T10:00:00+00:00",
             "created_at": "2026-08-21T10:00:00+00:00",
             "updated_at": "2026-08-21T10:05:00+00:00",
-            "resolved_at": null
+            "resolved_at": null,
+            "dlq_at": null,
+            "last_error_class": "",
+            "last_error": "",
+            "escalated_at": null
         }
     """
 
@@ -122,6 +126,38 @@ class CasePresenter(Presenter):
         "updated_at": PresenterField(type=str, source=lambda dao: dao.updated_at.isoformat()),
         "resolved_at": PresenterField(
             type=Optional[str], source=lambda dao: _iso(dao.resolved_at), default=None
+        ),
+        # The dead-letter triad. On the SUMMARY rather than the detail card
+        # because the DLQ tab is a list view: an engineer scanning it groups
+        # by error class and sorts by age, and a tab that has to open every
+        # row to learn which seam broke is a tab nobody opens twice.
+        "dlq_at": PresenterField(
+            type=Optional[str],
+            source=lambda dao: _iso(dao.dlq_at),
+            default=None,
+            help_text="When screening gave up on this case. Null unless state is dlq.",
+        ),
+        "last_error_class": PresenterField(
+            type=str,
+            source=lambda dao: dao.last_error_class or "",
+            default="",
+            help_text=(
+                "Class of the last screening failure - ContentUnavailable, "
+                "ScreeningUnavailable, TargetNotFound, other. Closed vocabulary; "
+                "group the DLQ tab by it."
+            ),
+        ),
+        "last_error": PresenterField(
+            type=str,
+            source=lambda dao: dao.last_error or "",
+            default="",
+            help_text="The last failure's message, truncated. For a human to read.",
+        ),
+        "escalated_at": PresenterField(
+            type=Optional[str],
+            source=lambda dao: _iso(dao.escalated_at),
+            default=None,
+            help_text="Set when the automatic re-screen sweep spent its cap and stopped.",
         ),
     }
 
@@ -477,6 +513,9 @@ def present_stats(stats: Dict[str, Any]):
         by_severity=stats.get("by_severity") or {},
         open_total=int(stats.get("open_total") or 0),
         resolved_total=int(stats.get("resolved_total") or 0),
+        queue_total=int(stats.get("queue_total") or 0),
+        dlq_total=int(stats.get("dlq_total") or 0),
+        dlq_by_error_class=stats.get("dlq_by_error_class") or {},
     )
 
 

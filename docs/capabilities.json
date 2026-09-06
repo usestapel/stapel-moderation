@@ -1,6 +1,6 @@
 {
   "module": "stapel-moderation",
-  "version": "0.6.3",
+  "version": "0.7.0",
   "provides": "The fleet's single producer of moderation verdicts: one target-generic queue over listings, reviews, chat messages and profiles, keyed by an opaque (target_type, target_key) and driven by a host-registered policy per type. One Case per target however many people complain, one status vocabulary in the whole module, an append-only Verdict and an append-only CaseEvent audit trail whose mutations are FORBIDDEN by mandate declaration. Screening is a comm-Task (deterministic rules, then schema-constrained llm.complete) with a closed hold-for-a-human default when the automation cannot answer. Resolution ACTS on the target by emitting moderation.completed, which stapel-listings and stapel-reviews already consume. Sanctions carry a kind, a scope, a reason, a clock, an appeal and an audit trail, and they bite through core's cross-service user blacklist — the hook every request path already checked and nobody had ever called. Plus DSA artefacts generated from the registries: a public policy disclosure, a statement of reasons on every takedown, an acknowledgement to every complainant, and an internal appeal heard by a different moderator.",
   "axes": [
     {
@@ -352,6 +352,22 @@
       "intent": "Take a lease on a case. A live lease held by somebody else refuses, which is what stops two moderators silently working one report."
     },
     {
+      "name": "close_subject_gone",
+      "kind": "factory",
+      "path": "stapel_moderation.services.close_subject_gone",
+      "intent": "Resolve a case whose subject cannot be addressed or no longer exists as dismissed / subject_gone, suppressing the verdict event when the key is synthetic. Use instead of re-screening a target nobody owns."
+    },
+    {
+      "name": "dead_letter_case",
+      "kind": "factory",
+      "path": "stapel_moderation.services.dead_letter_case",
+      "intent": "Park a case whose SCREENING kept failing in the dlq state, carrying the class of the last error. Use when a seam broke, never when a screener judged: a failure records no verdict and stays out of the human queue.",
+      "instead_of": [
+        "recording a policy_default needs_review verdict when the screener never answered",
+        "leaving a broken case in the moderator queue where it looks like work"
+      ]
+    },
+    {
       "name": "erase_user_reports",
       "kind": "factory",
       "path": "stapel_moderation.services.erase_user_reports",
@@ -359,6 +375,12 @@
       "instead_of": [
         "Report.objects.filter(...).delete()"
       ]
+    },
+    {
+      "name": "error_class_of",
+      "kind": "factory",
+      "path": "stapel_moderation.services.error_class_of",
+      "intent": "Clamp an exception or its name to the closed error-class vocabulary the DLQ tab groups by and the metrics label with. Use so a provider's stack trace never becomes a Prometheus series."
     },
     {
       "name": "evidence_content",
@@ -562,6 +584,12 @@
       "instead_of": [
         "Report.objects.create"
       ]
+    },
+    {
+      "name": "target_is_addressable",
+      "kind": "factory",
+      "path": "stapel_moderation.services.target_is_addressable",
+      "intent": "Ask whether a case's target_key can be handed to a content function at all — false for a draft case's synthetic draft:<uuid>. Check it before screening rather than discovering it as a remote LookupError."
     },
     {
       "name": "transition",

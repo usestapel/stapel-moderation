@@ -101,8 +101,36 @@ def screen_case(payload: dict) -> dict:
         case.refresh_from_db()
 
     policy = resolve_policy(case.target_type)
+
+    if not services.target_is_addressable(case):
+        # A draft case: its key is a synthetic `draft:<uuid>` that names no
+        # row in any module, so the content call is guaranteed to come back
+        # "no such target" — and, over a flattened transport, to come back
+        # looking like an outage and be retried. Asked and answered here for
+        # nothing, instead of nine times over the wire.
+        logger.info(
+            "moderation.screen: case %s has no addressable target (%s) — "
+            "closing rather than screening a key nobody owns",
+            case.id,
+            case.target_key,
+        )
+        services.close_subject_gone(case)
+        return {
+            "decision": VerdictDecision.DISMISSED,
+            "reason": "subject_gone",
+        }
+
+    from . import metrics as _content_metrics
+
     try:
         content = services.fetch_content(case.target_type, case.target_key, policy=policy)
+    except services.ContentUnavailable as exc:
+        # Counted where it happens: this raise leaves through the retry ladder
+        # and never reaches the screener's own instrumentation below, which is
+        # how 207 content failures on a client stand were invisible to every
+        # screening metric the module had.
+        _content_metrics.record_screen_failure(case.target_type, exc)
+        raise
     except services.TargetNotFound:
         # Permanent: retrying cannot conjure the target back.
         logger.info("moderation.screen: target gone for case %s", case.id)
@@ -127,12 +155,13 @@ def screen_case(payload: dict) -> dict:
     _started = _time.monotonic()
     try:
         result = screener(case, content, reports=reports)
-    except Exception:
+    except Exception as exc:
         _metrics.record_screen(
             case.target_type,
             _metrics.OUTCOME_UNAVAILABLE,
             seconds=_time.monotonic() - _started,
         )
+        _metrics.record_screen_failure(case.target_type, exc)
         raise
     _metrics.record_screen(
         case.target_type, result.decision, seconds=_time.monotonic() - _started
@@ -171,12 +200,29 @@ def screen_case(payload: dict) -> dict:
 def apply_screening_failure(case, *, error: str = "") -> None:
     """Apply ``ON_SCREENING_FAILURE`` to a case whose screening was parked.
 
-    Called from the ``task.failed`` subscriber. The default ``"hold"`` sends
-    the case to the human queue with a ``needs_review`` verdict naming
-    ``screening_unavailable``: **the human queue IS the fallback**, and
-    nothing is published without a decision. ``"approve"`` and ``"reject"``
-    exist because an owner is entitled to trade one risk for the other, and
-    each prints a system check saying which trade this deployment made.
+    Called from the ``task.failed`` subscriber, once the comm ladder has spent
+    ``SCREEN_MAX_ATTEMPTS``.
+
+    **``hold`` now dead-letters instead of rendering a verdict (0.7.0).** It
+    still holds — the case stays open, nothing is published on the strength of
+    a screener that never answered — but it holds in ``DLQ``, carrying the
+    class of the last error, and it records **no verdict at all**.
+
+    What it used to do was write ``policy_default / needs_review /
+    screening_unavailable`` and put the case in the human queue. Every word of
+    that was defensible in isolation and the sentence was false: no machine
+    had reviewed anything, so a machine verdict saying "a person must look"
+    was a decision nobody made, generated into DSA Art. 17 statements of
+    reasons, and dropped into a queue where it was indistinguishable from a
+    screener that had genuinely abstained. On a client stand it produced 567
+    machine ``needs_review`` verdicts, 122 queue rows no moderator could act
+    on, and — because the queue looked like it was filling with work — twelve
+    days of a 78% screening failure rate that nothing called an incident.
+
+    ``"approve"`` and ``"reject"`` are unchanged and still write a verdict:
+    those are real decisions an owner has chosen to make in advance, they act
+    on the target, and a rejection has to be appealable. Each prints a system
+    check saying which trade this deployment made.
     """
     from . import services
     from .conf import moderation_settings
@@ -185,7 +231,10 @@ def apply_screening_failure(case, *, error: str = "") -> None:
 
     if case.state == CaseState.RESOLVED:
         return
-    services._log(case, CaseEventKind.SCREEN_FAILED, error=error[:500])
+    error_class = services.error_class_of(_error_class_name(error))
+    services._log(
+        case, CaseEventKind.SCREEN_FAILED, error=error[:500], error_class=error_class
+    )
 
     policy = (moderation_settings.ON_SCREENING_FAILURE or "hold").lower()
     if policy == "approve":
@@ -193,7 +242,8 @@ def apply_screening_failure(case, *, error: str = "") -> None:
     elif policy == "reject":
         decision = VerdictDecision.REJECTED
     else:
-        decision = VerdictDecision.NEEDS_REVIEW
+        services.dead_letter_case(case, error=error, error_class=error_class)
+        return
 
     services.resolve_case(
         case,
@@ -202,6 +252,18 @@ def apply_screening_failure(case, *, error: str = "") -> None:
         reason_code=REASON_SCREENING_UNAVAILABLE,
         note="Automatic screening was unavailable.",
     )
+
+
+def _error_class_name(error: str) -> str:
+    """The exception name out of a parked task's error string.
+
+    The subscriber receives ``"ContentUnavailable(\"…\")"`` — the repr of what
+    the handler raised — so the class is the head of it. Read rather than
+    passed because ``task.failed`` carries a string and changing that is
+    core's contract, not this module's.
+    """
+    head = str(error or "").split("(", 1)[0].strip()
+    return head.rsplit(".", 1)[-1]
 
 
 # ── Beat jobs ────────────────────────────────────────────────────────
@@ -276,23 +338,35 @@ def rescreen_stuck_cases() -> int:
     """Hand cases nothing else can move back to the screening ladder.
 
     The complement of :func:`sweep_stale_cases`, which fills the human queue
-    (expired leases, stalled screenings) and never drains it. Two populations
-    end up parked there forever on a deployment whose queue is not staffed —
-    which is every deployment on day one:
+    (expired leases, stalled screenings) and never drains it. Three
+    populations end up parked forever on a deployment whose queue is not
+    staffed — which is every deployment on day one:
 
     * the machine **abstained** (``needs_review``) and no human came;
     * the owner **edited** the target while its case was still open, so the
       content changed under a case that had already been screened. Today that
       edit produces one ``RESUBMITTED`` audit row and nothing else, because
       ``open_case`` dedups on ``OPEN_STATES`` and ``handle_intake``
-      re-screens only from ``OPEN``.
+      re-screens only from ``OPEN``;
+    * the screening seam **broke** and the case was dead-lettered (0.7.0).
+      That one is waiting for a repair rather than for a person, and trying
+      it again is how the sweep finds out the repair has landed.
 
-    Both are the same request — *look at this again* — so both get the same
-    answer, and it is a re-screen, never a resolution. Nothing here decides a
-    case. That distinction is the whole reason this is a second job rather
-    than a branch inside the sweep: legacy's ``retry_stuck_moderation`` swept
-    ``needs_review`` into auto-approval on the same pass that retried, and
-    published unmoderated listings for years.
+    All three are the same request — *look at this again* — so all three get
+    the same answer, and it is a re-screen, never a resolution. Nothing here
+    decides a case, with one exception named below. That distinction is the
+    whole reason this is a second job rather than a branch inside the sweep:
+    legacy's ``retry_stuck_moderation`` swept ``needs_review`` into
+    auto-approval on the same pass that retried, and published unmoderated
+    listings for years.
+
+    **The exception, and it decides nothing about content.** A case whose
+    ``target_key`` cannot be handed to a content function at all — a draft
+    case, whose key is synthetic — is CLOSED as ``dismissed /
+    subject_gone`` instead of being re-screened. Not a judgement: there is
+    no content to judge and no module to instruct, and the alternative is
+    what this job did until 0.7.0, which was to spend the whole cap asking
+    a sibling service about a key it has never owned.
 
     Three guards keep it from becoming a billing loop:
 
@@ -307,9 +381,10 @@ def rescreen_stuck_cases() -> int:
     not become at-least-once billing.
 
     **A cap.** After ``RESCREEN_MAX_ATTEMPTS`` the case is ESCALATED: marked
-    once, logged once, and left alone. A permanently failing case has to be
-    *visible*, and a job that retries it forever is the opposite of visible —
-    it looks like work is happening.
+    once, logged once, and left alone **in whatever state it was in** — a
+    dead letter stays a dead letter, a queued case stays queued. A
+    permanently failing case has to be *visible*, and a job that retries it
+    forever is the opposite of visible — it looks like work is happening.
 
     CLAIMED cases are never touched: a moderator holding the lease outranks
     the clock.
@@ -328,77 +403,115 @@ def rescreen_stuck_cases() -> int:
 
     started = 0
     escalated = 0
-    # Only QUEUED. OPEN and SCREENING are the ladder's own business, CLAIMED
-    # belongs to a person, RESOLVED is done.
+    closed = 0
+    # QUEUED and DLQ. OPEN and SCREENING are the ladder's own business,
+    # CLAIMED belongs to a person, RESOLVED is done.
+    #
+    # DLQ is here because a dead letter is a case waiting for a REPAIR, and
+    # the cheapest way to find out whether the repair happened is to try
+    # again — on the same backoff and under the same cap, so a seam that
+    # stays broken costs four attempts over about a week rather than one per
+    # tick, and an engineer who fixes the proxy does not also have to
+    # remember to empty a queue.
+    sweepable = (CaseState.QUEUED, CaseState.DLQ)
     candidates = Case.objects.filter(
-        state=CaseState.QUEUED, escalated_at__isnull=True
+        state__in=sweepable, escalated_at__isnull=True
     ).order_by("updated_at")
     for case_id in list(candidates.values_list("pk", flat=True)):
+        unaddressable = False
         with transaction.atomic():
             case = Case.objects.select_for_update().filter(pk=case_id).first()
             # Re-read inside the lock: the sweep is not the only writer, and a
             # moderator may have claimed or resolved it since the id list.
-            if case is None or case.state != CaseState.QUEUED or case.escalated_at:
+            if case is None or case.state not in sweepable or case.escalated_at:
                 continue
 
-            resubmitted = case.resubmitted_at is not None and (
-                case.last_screened_at is None
-                or case.resubmitted_at > case.last_screened_at
-            )
-            if case.rescreen_attempts >= cap:
-                if resubmitted:
-                    # An edit is new information, not a retry of the same
-                    # question — but the cap still holds, so say so rather
-                    # than screening past it.
-                    logger.info(
-                        "moderation: case %s was resubmitted past the re-screen "
-                        "cap; it stays queued for a human",
-                        case.id,
-                    )
-                case.escalated_at = now
-                case.save(update_fields=["escalated_at", "updated_at"])
-                services._log(
-                    case,
-                    CaseEventKind.ESCALATED,
-                    attempts=case.rescreen_attempts,
-                    reason_code="rescreen_cap_reached",
+            if not services.target_is_addressable(case):
+                # A draft case. Re-screening it is not "trying again": it is
+                # asking a sibling module about a synthetic `draft:<uuid>` key
+                # it has never owned, and the answer is fixed for all time.
+                # This loop asked anyway until 0.7.0 — on a client stand, 69
+                # draft cases spent nine attempts each and produced 207
+                # failures that every log line called an outage. Closed
+                # outside the lock, because `close_subject_gone` resolves and
+                # emits in a transaction of its own.
+                unaddressable = True
+            else:
+                resubmitted = case.resubmitted_at is not None and (
+                    case.last_screened_at is None
+                    or case.resubmitted_at > case.last_screened_at
                 )
-                escalated += 1
-                continue
-
-            if not resubmitted:
-                due = case.last_screened_at or case.updated_at
-                wait = timedelta(seconds=window * (2 ** case.rescreen_attempts))
-                if due > now - wait:
+                if case.rescreen_attempts >= cap:
+                    if resubmitted:
+                        # An edit is new information, not a retry of the same
+                        # question — but the cap still holds, so say so rather
+                        # than screening past it.
+                        logger.info(
+                            "moderation: case %s was resubmitted past the "
+                            "re-screen cap; it stays %s for a human",
+                            case.id,
+                            case.state,
+                        )
+                    case.escalated_at = now
+                    case.save(update_fields=["escalated_at", "updated_at"])
+                    services._log(
+                        case,
+                        CaseEventKind.ESCALATED,
+                        attempts=case.rescreen_attempts,
+                        reason_code="rescreen_cap_reached",
+                        # Which queue it is stuck IN is the first thing an
+                        # operator needs: escalated-in-DLQ is an engineer's
+                        # problem, escalated-in-queue is a moderator's.
+                        state=case.state,
+                        error_class=case.last_error_class,
+                    )
+                    escalated += 1
                     continue
 
-            Case.objects.filter(pk=case.pk).update(
-                rescreen_attempts=case.rescreen_attempts + 1,
-                resubmitted_at=None,
-            )
-            case.refresh_from_db()
-            services._log(
-                case,
-                CaseEventKind.RESCREENED,
-                attempt=case.rescreen_attempts,
-                reason_code="resubmitted" if resubmitted else "stuck_in_queue",
-            )
+                if not resubmitted:
+                    due = case.last_screened_at or case.updated_at
+                    wait = timedelta(seconds=window * (2 ** case.rescreen_attempts))
+                    if due > now - wait:
+                        continue
 
-        # Outside the row lock: start_screening opens its own transaction and
-        # emits, and holding a select_for_update across it would serialise the
-        # whole sweep behind one screening.
+                Case.objects.filter(pk=case.pk).update(
+                    rescreen_attempts=case.rescreen_attempts + 1,
+                    resubmitted_at=None,
+                )
+                case.refresh_from_db()
+                services._log(
+                    case,
+                    CaseEventKind.RESCREENED,
+                    attempt=case.rescreen_attempts,
+                    reason_code="resubmitted" if resubmitted else "stuck_in_queue",
+                )
+
+        # Outside the row lock: both calls below open their own transaction
+        # and emit, and holding a select_for_update across one would serialise
+        # the whole sweep behind a single screening.
+        if unaddressable:
+            try:
+                services.close_subject_gone(case)
+                closed += 1
+            except services.ModerationError:
+                logger.exception(
+                    "moderation: could not close unaddressable case %s", case.id
+                )
+            continue
+
         try:
             services.rescan_case(case)
             started += 1
         except services.ModerationError:
             logger.exception("moderation: could not re-screen stuck case %s", case.id)
 
-    if started or escalated:
+    if started or escalated or closed:
         logger.info(
             "moderation re-screen sweep: %s case(s) sent back to the ladder, "
-            "%s escalated to a human",
+            "%s escalated, %s closed as subject_gone",
             started,
             escalated,
+            closed,
         )
     return started
 

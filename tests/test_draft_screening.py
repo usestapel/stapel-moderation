@@ -24,7 +24,13 @@ answer never returns ``allowed=True``.
 import pytest
 
 from stapel_moderation import services
-from stapel_moderation.models import Case, CaseState, VerdictDecision, VerdictSource
+from stapel_moderation.models import (
+    Case,
+    CaseState,
+    Verdict,
+    VerdictDecision,
+    VerdictSource,
+)
 
 pytestmark = pytest.mark.django_db
 
@@ -185,7 +191,14 @@ def test_an_unavailable_screener_never_allows_the_draft(
     assert result.allowed is False
     assert result.decision == VerdictDecision.NEEDS_REVIEW
     assert result.reason_code == "screening_unavailable"
-    assert result.case_id
+    # And NOTHING is written down (0.7.0). The caller still hears "no", which
+    # is the assertion this test exists for; what it must not do is mint a
+    # case carrying a machine verdict nobody rendered, against a synthetic
+    # key nothing can ever re-read. That combination produced 69 undecidable
+    # queue rows on a client stand and 207 screening failures retrying them.
+    assert not result.case_id
+    assert Case.objects.count() == 0
+    assert Verdict.objects.count() == 0
 
 
 def test_screening_disabled_holds_the_draft_rather_than_clearing_it(

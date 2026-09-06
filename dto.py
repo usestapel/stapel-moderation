@@ -60,13 +60,27 @@ class CasePageDTO:
 
 @dataclass
 class StatsDTO:
-    """Queue counters for the console header and DSA Art. 24(1) reporting."""
+    """Queue counters for the console header and DSA Art. 24(1) reporting.
+
+    ``queue_total`` and ``dlq_total`` are separate headline numbers and must
+    stay separate in any console that renders them: the first is work a
+    MODERATOR owes, the second is work an ENGINEER owes. Adding them together
+    is how a broken screening seam spent twelve days on a client stand
+    looking like a busy moderation queue.
+    """
 
     by_state: Dict[str, int] = field(default_factory=dict)
     by_target_type: Dict[str, int] = field(default_factory=dict)
     by_severity: Dict[str, int] = field(default_factory=dict)
     open_total: int = 0
     resolved_total: int = 0
+    #: Cases a human is expected to work: ``queued`` + ``claimed``.
+    queue_total: int = 0
+    #: Cases parked because screening kept failing. Not the human queue.
+    dlq_total: int = 0
+    #: The dead-letter park split by what broke — the DLQ tab's group-by, and
+    #: the answer to "which seam do I repair first".
+    dlq_by_error_class: Dict[str, int] = field(default_factory=dict)
 
 
 @dataclass

@@ -1,8 +1,8 @@
-# stapel-moderation 0.6.3
+# stapel-moderation 0.7.0
 
 The fleet's single producer of moderation verdicts: one target-generic queue over listings, reviews, chat messages and profiles, keyed by an opaque (target_type, target_key) and driven by a host-registered policy per type. One Case per target however many people complain, one status vocabulary in the whole module, an append-only Verdict and an append-only CaseEvent audit trail whose mutations are FORBIDDEN by mandate declaration. Screening is a comm-Task (deterministic rules, then schema-constrained llm.complete) with a closed hold-for-a-human default when the automation cannot answer. Resolution ACTS on the target by emitting moderation.completed, which stapel-listings and stapel-reviews already consume. Sanctions carry a kind, a scope, a reason, a clock, an appeal and an audit trail, and they bite through core's cross-service user blacklist — the hook every request path already checked and nobody had ever called. Plus DSA artefacts generated from the registries: a public policy disclosure, a statement of reasons on every takedown, an acknowledgement to every complainant, and an internal appeal heard by a different moderator.
 
-Contract: axes 11 · surface 61 · extension points 6 · operations 18 · error codes 70.
+Contract: axes 11 · surface 65 · extension points 6 · operations 18 · error codes 70.
 Generated from docs/capabilities.json by `stapel-llms-txt` — do not edit; drift-gated by `make contract-check`.
 
 ## Configuration axes — what a product switches on
@@ -103,9 +103,16 @@ This is the answer to "does Stapel already have something for X?". `instead of` 
 ### factory
 - claim_case — stapel_moderation.services.claim_case
   Take a lease on a case. A live lease held by somebody else refuses, which is what stops two moderators silently working one report.
+- close_subject_gone — stapel_moderation.services.close_subject_gone
+  Resolve a case whose subject cannot be addressed or no longer exists as dismissed / subject_gone, suppressing the verdict event when the key is synthetic. Use instead of re-screening a target nobody owns.
+- dead_letter_case — stapel_moderation.services.dead_letter_case
+  instead of: leaving a broken case in the moderator queue where it looks like work, recording a policy_default needs_review verdict when the screener never answered
+  Park a case whose SCREENING kept failing in the dlq state, carrying the class of the last error. Use when a seam broke, never when a screener judged: a failure records no verdict and stays out of the human queue.
 - erase_user_reports — stapel_moderation.services.erase_user_reports
   instead of: Report.objects.filter(...).delete()
   Detach a user from their complaints and appeals, keeping the case, the counts and the platform's own compliance record.
+- error_class_of — stapel_moderation.services.error_class_of
+  Clamp an exception or its name to the closed error-class vocabulary the DLQ tab groups by and the metrics label with. Use so a provider's stack trace never becomes a Prometheus series.
 - evidence_content — stapel_moderation.services.evidence_content
   instead of: passing a raw evidence dict to the screener or the case card
   Assemble a TargetContent from a reporter's attestation for a target nobody serves, stamped source='evidence'/verified=False so no console can render it as content the platform read.
@@ -177,6 +184,8 @@ This is the answer to "does Stapel already have something for X?". `instead of` 
   Accept one complaint: validate against the reason registry and the type policy, join or open the case, record the report, count it.
 - sweep_stale_cases — stapel_moderation.tasks.sweep_stale_cases
   Return expired claims and stalled screenings to the queue. Never renders a verdict — that is the whole difference from the predecessor system's stale sweeper.
+- target_is_addressable — stapel_moderation.services.target_is_addressable
+  Ask whether a case's target_key can be handed to a content function at all — false for a draft case's synthetic draft:<uuid>. Check it before screening rather than discovering it as a remote LookupError.
 
 ## Extension points — what a product replaces, fork-free
 - NotSanctioned [permission_class]

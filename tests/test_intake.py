@@ -142,6 +142,81 @@ def test_missing_target_is_a_lookup_failure_not_an_outage(
         )
 
 
+def test_a_flattened_remote_lookup_error_is_still_a_missing_target(
+    content_double, user
+):
+    """The transport hop that turned a 404 into a twelve-day retry loop.
+
+    ``__cause__`` survives an in-process call and nothing else. Over NATS,
+    core rebuilds the owner's exception as
+    ``FunctionCallError("function 'x' failed remotely: LookupError('…')")``
+    with no cause attached — so ``_is_not_found`` said "not a 404", the case
+    was treated as an outage, and the ladder retried a listing that was
+    deleted at the end of a probe run. 207 events on a client stand, all of
+    them this.
+
+    The remote exception NAME is the one structured thing that survives, and
+    it is read only in the ``failed remotely:`` tail, so prose cannot fake it.
+    """
+    from stapel_core.comm import CommError, function
+
+    from stapel_moderation import services
+    from stapel_moderation.registry import register_target_type
+
+    @function("listings.flattened_content")
+    def _flattened(payload):
+        raise CommError(
+            "function 'listings.moderation_content' failed remotely: "
+            "LookupError('listing draft:71bde8564c2148e09eb0d2b3b8d8ab80 "
+            "not found')"
+        )
+
+    register_target_type(
+        "flat",
+        {
+            "id_field": "listing_id",
+            "content_function": "listings.flattened_content",
+            "verdict_event": "moderation.completed",
+        },
+    )
+
+    with pytest.raises(services.TargetNotFound):
+        services.fetch_content("flat", "draft:71bde856")
+
+
+def test_a_remote_outage_is_still_an_outage(content_double, user):
+    """The other direction, and the reason the match is not a substring hunt.
+
+    A provider that says the words "not found" in prose — an upstream 404 it
+    is reporting, a message mentioning a missing model — must NOT dismiss
+    somebody's case. Only an exception repr in the ``failed remotely:`` tail
+    counts.
+    """
+    from stapel_core.comm import CommError, function
+
+    from stapel_moderation import services
+    from stapel_moderation.registry import register_target_type
+
+    @function("listings.outage_content")
+    def _outage(payload):
+        raise CommError(
+            "function 'listings.moderation_content' failed remotely: "
+            "ProviderError('upstream said the model was not found')"
+        )
+
+    register_target_type(
+        "flaky",
+        {
+            "id_field": "listing_id",
+            "content_function": "listings.outage_content",
+            "verdict_event": "moderation.completed",
+        },
+    )
+
+    with pytest.raises(services.ContentUnavailable):
+        services.fetch_content("flaky", "42")
+
+
 def test_reason_requiring_a_description_refuses_an_empty_one(
     content_double, llm_double, user
 ):

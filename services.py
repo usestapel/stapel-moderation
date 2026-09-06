@@ -25,6 +25,7 @@ from stapel_core.comm import mutate_and_emit
 from . import events
 from .models import (
     CASE_TRANSITIONS,
+    HUMAN_QUEUE_STATES,
     OPEN_STATES,
     TERMINAL_DECISIONS,
     Appeal,
@@ -43,7 +44,9 @@ from .models import (
     VerdictSource,
 )
 from .registry import (
+    REASON_SCREENING_FAILED,
     REASON_SCREENING_UNAVAILABLE,
+    REASON_SUBJECT_GONE,
     UnknownReason,
     check_can_report,
     content_payload_key,
@@ -354,20 +357,74 @@ def _is_not_found(exc) -> bool:
     be closed the honest way by ``ReviewNotFound`` subclassing ``LookupError``
     in its next minor.
 
-    **Stated limitation.** ``__cause__`` only survives the in-process
-    transport; over NATS or HTTP the owner's exception is flattened into a
-    message string, so a missing target reads as an outage and the case is
-    retried instead of dismissed. Retrying a target that is gone is the safe
-    direction of that error (the screening task parks and a human looks),
-    and closing it properly means structured error codes on comm — core's
-    work, not a per-module string match on a remote message.
+    **The flattened transport.** ``__cause__`` only survives the in-process
+    transport. Over NATS or HTTP core rebuilds the failure as
+    ``FunctionCallError("function '<name>' failed remotely: <repr>")`` with
+    no ``__cause__`` at all (``stapel_core/comm/nats.py``,
+    ``comm/functions.py``), so until 0.7.0 every missing target on a real
+    fleet read as an outage. Measured on a client stand: 207 ``screen_failed``
+    events over two days, all of them one unresolvable key retried nine times
+    each, every one of them logged as ``ContentUnavailable``.
+
+    So the flattened form is read too — the owner's exception NAME is the one
+    structured thing that survives the round trip, and it is matched only in
+    the ``failed remotely:`` tail, never against the whole message, so a
+    provider that mentions "not found" in prose cannot dismiss a case.
+
+    This stays a string match until comm carries structured error codes; that
+    is core's work and this docstring is the reason to do it.
     """
     cause = exc.__cause__
-    if cause is None:
+    if cause is not None:
+        if isinstance(cause, LookupError):
+            return True
+        if type(cause).__name__.endswith("NotFound"):
+            return True
+    return _remote_error_is_not_found(str(exc))
+
+
+#: Exception NAMES the ``*.moderation_content`` family raises for "no such
+#: target". Matched against the remote repr, so the vocabulary is closed.
+_NOT_FOUND_REMOTE_NAMES = ("LookupError", "KeyError", "ObjectDoesNotExist")
+
+#: The marker core writes when it flattens a provider's exception.
+_REMOTE_MARKER = "failed remotely:"
+
+
+def _remote_error_is_not_found(message: str) -> bool:
+    """Did a FLATTENED remote failure carry a "no such target" exception?
+
+    Only the tail after ``failed remotely:`` is read, and only for an
+    exception name immediately followed by ``(`` — the shape of a ``repr``.
+    """
+    marker, _, tail = message.partition(_REMOTE_MARKER)
+    if not tail or marker == message:
         return False
-    if isinstance(cause, LookupError):
-        return True
-    return type(cause).__name__.endswith("NotFound")
+    tail = tail.strip()
+    head = tail.split("(", 1)[0].strip() if "(" in tail else ""
+    if not head:
+        return False
+    # Strip a module path: ``listings.errors.ReviewNotFound(...)``.
+    head = head.rsplit(".", 1)[-1]
+    return head in _NOT_FOUND_REMOTE_NAMES or head.endswith("NotFound")
+
+
+def target_is_addressable(case) -> bool:
+    """Can this case's ``target_key`` be handed to a content function at all?
+
+    A DRAFT case cannot: its key is a synthetic ``draft:<uuid4hex>`` minted by
+    :func:`screen_draft`, it names no row in any module, and asking the owner
+    about it is guaranteed to come back "no such target". The module has
+    always documented that (``CaseOrigin.DRAFT``, ``DRAFT_KEY_PREFIX``) and
+    then asked anyway: ``rescreen_stuck_cases`` fed every QUEUED case back to
+    the ladder without looking at its origin, so on a client stand 69 draft
+    cases spent 9 screening attempts each sending ``draft:71bde856…`` to
+    ``listings.moderation_content`` as a ``listing_id``.
+
+    Asked here, before the call, so the answer costs nothing and cannot be
+    mistaken for an outage.
+    """
+    return not str(case.target_key or "").startswith(DRAFT_KEY_PREFIX)
 
 
 # ── Case lifecycle ───────────────────────────────────────────────────
@@ -535,6 +592,111 @@ def queue_case(case, *, reason_code: str = "", actor_id=None) -> None:
     with mutate_and_emit() as emit_event:
         case = Case.objects.select_for_update().get(pk=case.pk)
         _queue(case, reason_code=reason_code, actor_id=actor_id, emit_event=emit_event)
+
+
+# ── The dead-letter park ─────────────────────────────────────────────
+
+
+def error_class_of(exc_or_name) -> str:
+    """The low-cardinality class name a failure is filed under.
+
+    Takes an exception or a name. Everything unrecognised becomes ``other``
+    rather than a new label value — these names reach a Prometheus label and
+    a DLQ tab's group-by, and an open vocabulary is a cardinality incident in
+    one and an unusable filter in the other.
+    """
+    name = (
+        type(exc_or_name).__name__
+        if isinstance(exc_or_name, BaseException)
+        else str(exc_or_name or "")
+    )
+    return name if name in ERROR_CLASSES else ("other" if name else "")
+
+
+#: The closed vocabulary of ``Case.last_error_class``. Every screening failure
+#: this module can produce, and nothing else.
+ERROR_CLASSES = (
+    "ContentUnavailable",
+    "ScreeningUnavailable",
+    "TargetNotFound",
+    "InvalidTransition",
+    "other",
+)
+
+
+def dead_letter_case(case, *, error: str = "", error_class: str = "", actor_id=None) -> None:
+    """Park a case whose SCREENING kept failing, out of the human queue.
+
+    The state a screening failure produces since 0.7.0, and it produces **no
+    verdict**. Until then the failure was written down as
+    ``policy_default / needs_review`` — a machine verdict saying "a person
+    must look" issued by a code path where no machine had looked at anything.
+    That is a lie in the audit trail (DSA Art. 17 statements of reasons are
+    generated from these verdicts), it fills the moderator queue with rows a
+    moderator cannot act on, and it makes a dead screener indistinguishable
+    from a cautious one — the exact reading that let a client stand run for
+    twelve days at a 78% screening failure rate with a green dashboard.
+
+    Idempotent: a case already parked has its error stamp refreshed and its
+    ``dlq_at`` left where it was, so "since when" survives a second failure.
+    """
+    from . import metrics as _metrics
+
+    was_parked = case.state == CaseState.DLQ
+    # No fact is emitted and none should be: a dead letter is this module's
+    # own operational state, not something a target module must act on. The
+    # audit row and the counter are the record.
+    with transaction.atomic():
+        case = Case.objects.select_for_update().get(pk=case.pk)
+        if case.state == CaseState.RESOLVED:
+            return
+        if case.state != CaseState.DLQ:
+            transition(case, CaseState.DLQ, actor_id=actor_id, error_class=error_class)
+        Case.objects.filter(pk=case.pk).update(
+            dlq_at=case.dlq_at or timezone.now(),
+            last_error_class=(error_class or "other")[:64],
+            last_error=str(error or "")[:500],
+            claimed_by=None,
+            claimed_until=None,
+        )
+        case.refresh_from_db()
+        _log(
+            case,
+            CaseEventKind.DEAD_LETTERED,
+            actor_id=actor_id,
+            error_class=error_class,
+            error=str(error or "")[:500],
+            reason_code=REASON_SCREENING_FAILED,
+        )
+    if not was_parked:
+        _metrics.record_dead_letter(case.target_type, error_class)
+    logger.warning(
+        "moderation: case %s dead-lettered (%s) — the screening seam is "
+        "failing, not the content",
+        case.id,
+        error_class or "other",
+    )
+
+
+def close_subject_gone(case, *, actor_id=None, note: str = "") -> None:
+    """Resolve a case whose subject cannot be addressed or no longer exists.
+
+    ``dismissed`` — a statement about the COMPLAINT, not about content nobody
+    can read — under ``subject_gone``, and with ``emit_verdict_event=False``
+    whenever the key is synthetic: a verdict topic is an INSTRUCTION to a
+    target module, and instructing a module about a ``draft:<uuid>`` it has
+    never heard of is a payload it either logs forever or redelivers forever
+    (the same reasoning as :func:`screen_draft`).
+    """
+    resolve_case(
+        case,
+        decision=VerdictDecision.DISMISSED,
+        source=VerdictSource.POLICY_DEFAULT,
+        reason_code=REASON_SUBJECT_GONE,
+        note=note or "The moderated subject no longer exists.",
+        actor_id=actor_id,
+        emit_verdict_event=target_is_addressable(case),
+    )
 
 
 # ── Complaints ───────────────────────────────────────────────────────
@@ -967,6 +1129,15 @@ def screen_draft(
     will not do is answer ``allowed=True`` because a model failed to reply —
     the shape of fail-open that published unscreened listings on the
     predecessor system for half an hour after its provider went down.
+
+    **A failure writes nothing down (0.7.0).** The ``hold`` answer to an
+    unavailable screener no longer persists a case with a ``needs_review``
+    verdict. The refusal that gets a case is a refusal somebody DECIDED —
+    ``rejected``, whether by the screener or by ``ON_SCREENING_FAILURE =
+    "reject"`` — because that is the one an author is entitled to appeal. An
+    outage is not a decision, and recording it as one filled a client stand's
+    moderator queue with 69 undecidable drafts and its verdict table with
+    machine ``needs_review`` rows no machine had produced.
     """
     import uuid
 
@@ -1000,12 +1171,17 @@ def screen_draft(
 
     from . import metrics as _metrics
 
+    #: True when this answer comes from the fallback rather than from a
+    #: screener that looked. It decides whether a case is written down.
+    screening_failed = False
     if not policy["screen"] or not moderation_settings.SCREEN_ENABLED:
         result = _draft_fallback(
             moderation_settings.ON_SCREENING_UNAVAILABLE,
             reason_code=REASON_SCREENING_UNAVAILABLE,
         )
+        screening_failed = True
         _metrics.record_draft_screen(target_type, _metrics.OUTCOME_UNAVAILABLE)
+        _metrics.record_screen_failure(target_type, "ScreeningUnavailable")
     else:
         try:
             result = get_screener()(probe, content, reports=tuple(reports))
@@ -1015,9 +1191,34 @@ def screen_draft(
                 moderation_settings.ON_SCREENING_FAILURE,
                 reason_code=REASON_SCREENING_UNAVAILABLE,
             )
+            screening_failed = True
             _metrics.record_draft_screen(target_type, _metrics.OUTCOME_UNAVAILABLE)
+            _metrics.record_screen_failure(target_type, exc)
         else:
             _metrics.record_draft_screen(target_type, result.decision)
+
+    if screening_failed and result.decision == VerdictDecision.NEEDS_REVIEW:
+        # **A failure is not a verdict** (0.7.0). The caller still hears
+        # `allowed=False` — unavailability is never permission, and that has
+        # not changed — but nothing is written down, because there is nothing
+        # to write: no screener looked, no reasons can be stated, and there is
+        # no decision to appeal. What this branch used to do was persist a
+        # case carrying a `policy_default / needs_review` verdict that read,
+        # to a moderator and to a DSA statement of reasons alike, as "the
+        # machine considered this and wanted a person". On a client stand it
+        # minted 69 such cases against drafts nobody could re-read, each of
+        # which the stuck sweep then retried nine times against a synthetic
+        # key. The record of this event is `moderation_screen_failed_total`,
+        # which is a number an operator can alarm on rather than a queue row
+        # that looks like work.
+        return DraftScreeningResult(
+            allowed=False,
+            decision=result.decision,
+            reason_code=result.reason_code,
+            rationale=result.rationale,
+            confidence=result.confidence,
+            source=result.source,
+        )
 
     if result.decision == VerdictDecision.APPROVED:
         return DraftScreeningResult(
@@ -1131,12 +1332,18 @@ def rescan_case(case, *, actor_id=None) -> Optional[str]:
 
     A resolved case is reopened through the appeal edge first — a rescan of a
     decided case is a decision to look again, and the audit has to show that.
+
+    A DEAD-LETTERED case is revived: this is the "the proxy is back, empty the
+    park" call, and it is why ``DLQ`` is a park and not a grave.
     """
     with mutate_and_emit() as emit_event:
         case = Case.objects.select_for_update().get(pk=case.pk)
         if case.state == CaseState.RESOLVED:
             transition(case, CaseState.QUEUED, actor_id=actor_id, reason="rescan")
             _log(case, CaseEventKind.REOPENED, actor_id=actor_id, reason="rescan")
+        elif case.state == CaseState.DLQ:
+            _log(case, CaseEventKind.REVIVED, actor_id=actor_id)
+            Case.objects.filter(pk=case.pk).update(dlq_at=None)
         elif case.state == CaseState.CLAIMED:
             transition(case, CaseState.QUEUED, actor_id=actor_id)
         Case.objects.filter(pk=case.pk).update(claimed_by=None, claimed_until=None)
@@ -1487,6 +1694,7 @@ def list_cases(
     severity_min=None,
     scope_key: str = "",
     subject_user_id=None,
+    error_class: str = "",
     before=None,
     limit=None,
 ):
@@ -1519,6 +1727,10 @@ def list_cases(
         qs = qs.filter(subject_user_id=subject_user_id)
     if severity_min is not None:
         qs = qs.filter(severity__gte=int(severity_min))
+    if error_class:
+        # The DLQ tab's group-by: "show me everything the content seam broke
+        # on" is a different repair from "show me everything the LLM broke on".
+        qs = qs.filter(last_error_class=error_class)
     if reason_code:
         # One reason table across every target type is what makes this
         # filter safe: legacy's version silently dropped every complaint
@@ -1545,12 +1757,26 @@ def queue_stats() -> dict:
         str(row["severity"]): row["n"]
         for row in Case.objects.values("severity").annotate(n=Count("id"))
     }
+    by_error_class = {
+        row["last_error_class"]: row["n"]
+        for row in Case.objects.filter(state=CaseState.DLQ)
+        .exclude(last_error_class="")
+        .values("last_error_class")
+        .annotate(n=Count("id"))
+    }
     return {
         "by_state": by_state,
         "by_target_type": by_target,
         "by_severity": by_severity,
         "open_total": sum(by_state.get(s, 0) for s in OPEN_STATES),
         "resolved_total": by_state.get(CaseState.RESOLVED, 0),
+        # The console header's two headline numbers, and they are deliberately
+        # not one: `queue_total` is work a MODERATOR owes, `dlq_total` is work
+        # an ENGINEER owes. Summing them is how a broken seam disguised itself
+        # as a busy queue for twelve days.
+        "queue_total": sum(by_state.get(s, 0) for s in HUMAN_QUEUE_STATES),
+        "dlq_total": by_state.get(CaseState.DLQ, 0),
+        "dlq_by_error_class": by_error_class,
     }
 
 
@@ -1754,6 +1980,7 @@ def policy_disclosure(*, lang: str = "", target_type: str = "") -> dict:
 
 __all__ = [
     "DRAFT_KEY_PREFIX",
+    "ERROR_CLASSES",
     "SCREEN_TASK",
     "AlreadyReported",
     "AppealNotAllowed",
@@ -1777,6 +2004,9 @@ __all__ = [
     "active_sanctions",
     "apply_sanction_enforcement",
     "claim_case",
+    "close_subject_gone",
+    "dead_letter_case",
+    "error_class_of",
     "fetch_content",
     "issue_sanction",
     "issue_standalone_sanction",
@@ -1802,5 +2032,6 @@ __all__ = [
     "screen_draft",
     "start_screening",
     "submit_report",
+    "target_is_addressable",
     "transition",
 ]

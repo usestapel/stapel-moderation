@@ -36,6 +36,22 @@ Three questions these metrics answer that no log line can:
     is the path where the counter is not a convenience but the only
     record that exists.
 
+``moderation_screen_failed_total{error_class}``
+    **Which seam is broken**, which ``outcome="unavailable"`` cannot say.
+    The same stand that ran twelve days at a 78% failure rate was in fact
+    running two unrelated faults at once — an unreachable LLM proxy
+    (``ScreeningUnavailable``, 199 events) and a content function being
+    asked for a key that names nothing (``ContentUnavailable``, 207) — and
+    a single "unavailable" counter would have sent an engineer to repair
+    the wrong one. This is the series to alarm on:
+    ``rate(moderation_screen_failed_total[15m]) > 0``, and the label says
+    who to wake.
+
+``moderation_case_dlq_total{error_class}``
+    Cases parked because the seam kept failing. The counter equivalent of
+    "the DLQ tab has rows in it" — it moves once per case rather than once
+    per attempt, so it counts damage rather than noise.
+
 Recording never raises. Every call site here is doing something more
 important than being observed, and half of them are already on a failure
 path.
@@ -59,6 +75,25 @@ DRAFT_SCREEN_METRIC = "moderation_draft_screen_total"
 #: second must not lose the history of the first.
 DRAFT_FAIL_OPEN_METRIC = "moderation_draft_screen_fail_open_total"
 
+#: Screening failures by the CLASS of what failed, from both doors.
+SCREEN_FAILURE_METRIC = "moderation_screen_failed_total"
+#: Cases parked in the dead-letter state, by the class that parked them.
+DLQ_METRIC = "moderation_case_dlq_total"
+
+#: Error-class label values. Closed, and kept in step with
+#: ``services.ERROR_CLASSES`` — anything else is counted as ``other`` rather
+#: than allowed to invent a series.
+ERROR_CLASS_CONTENT = "ContentUnavailable"
+ERROR_CLASS_SCREENING = "ScreeningUnavailable"
+ERROR_CLASS_TARGET_GONE = "TargetNotFound"
+ERROR_CLASSES = (
+    ERROR_CLASS_CONTENT,
+    ERROR_CLASS_SCREENING,
+    ERROR_CLASS_TARGET_GONE,
+    "InvalidTransition",
+    "other",
+)
+
 #: Outcome label values. A closed vocabulary — these become Prometheus
 #: label values, and an unbounded set of them is a cardinality incident.
 OUTCOME_APPROVED = "approved"
@@ -81,6 +116,8 @@ _DESCRIPTIONS = {
     DRAFT_FAIL_OPEN_METRIC: (
         "Drafts allowed through because screening could not answer"
     ),
+    SCREEN_FAILURE_METRIC: "Screening failures by the class of what failed",
+    DLQ_METRIC: "Cases parked in the dead-letter state, by error class",
 }
 
 
@@ -125,6 +162,15 @@ def declare_series(target_types=()) -> None:
             "counter", DRAFT_FAIL_OPEN_METRIC, 0,
             labels={"target_type": target_type},
         )
+        for error_class in ERROR_CLASSES:
+            _safe(
+                "counter", SCREEN_FAILURE_METRIC, 0,
+                labels={"target_type": target_type, "error_class": error_class},
+            )
+            _safe(
+                "counter", DLQ_METRIC, 0,
+                labels={"target_type": target_type, "error_class": error_class},
+            )
 
 
 def record_screen(target_type: str, outcome: str, *, seconds: float | None = None) -> None:
@@ -138,6 +184,34 @@ def record_screen(target_type: str, outcome: str, *, seconds: float | None = Non
             "histogram", SCREEN_DURATION_METRIC, float(seconds),
             labels={"target_type": str(target_type)},
         )
+
+
+def _error_class(value) -> str:
+    """Clamp an exception or a name to the closed error-class vocabulary."""
+    name = type(value).__name__ if isinstance(value, BaseException) else str(value or "")
+    return name if name in ERROR_CLASSES else "other"
+
+
+def record_screen_failure(target_type: str, error_class) -> None:
+    """Count one screening failure, by the class of what failed.
+
+    Takes the exception itself or its name. Called from BOTH doors — the
+    task ladder and the synchronous draft entrance — because "is screening
+    working" is one question and answering it per door is how a fleet ends
+    up believing half of an outage.
+    """
+    _safe(
+        "counter", SCREEN_FAILURE_METRIC,
+        labels={"target_type": str(target_type), "error_class": _error_class(error_class)},
+    )
+
+
+def record_dead_letter(target_type: str, error_class) -> None:
+    """Count one case parked in the dead-letter state."""
+    _safe(
+        "counter", DLQ_METRIC,
+        labels={"target_type": str(target_type), "error_class": _error_class(error_class)},
+    )
 
 
 def record_draft_screen(target_type: str, outcome: str) -> None:
@@ -170,8 +244,10 @@ def record_draft_fail_open(target_type: str, reason_code: str = "") -> None:
 
 
 __all__ = [
+    "DLQ_METRIC",
     "DRAFT_FAIL_OPEN_METRIC",
     "DRAFT_SCREEN_METRIC",
+    "ERROR_CLASSES",
     "OUTCOMES",
     "OUTCOME_APPROVED",
     "OUTCOME_DISMISSED",
@@ -179,9 +255,12 @@ __all__ = [
     "OUTCOME_REJECTED",
     "OUTCOME_UNAVAILABLE",
     "SCREEN_DURATION_METRIC",
+    "SCREEN_FAILURE_METRIC",
     "SCREEN_METRIC",
     "declare_series",
+    "record_dead_letter",
     "record_draft_fail_open",
     "record_draft_screen",
     "record_screen",
+    "record_screen_failure",
 ]

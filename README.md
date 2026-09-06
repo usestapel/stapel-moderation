@@ -24,11 +24,11 @@ pip install stapel-moderation
 
 | Fact | Value |
 |---|---|
-| Version | `0.6.3` |
+| Version | `0.7.0` |
 | Python | `>=3.11` (3.11, 3.12, 3.13) |
 | HTTP operations | 18 |
 | Config axes | 11 |
-| Usage surface | 61 |
+| Usage surface | 65 |
 | Extension points | 6 |
 | Error codes | 70 |
 | Fleet dependencies | [`stapel-agent`](https://github.com/usestapel/stapel-agent) (optional) · [`stapel-auth`](https://github.com/usestapel/stapel-auth) (optional) · [`stapel-cdn`](https://github.com/usestapel/stapel-cdn) (optional) · [`stapel-core`](https://github.com/usestapel/stapel-core) · [`stapel-notifications`](https://github.com/usestapel/stapel-notifications) (optional) |
@@ -114,19 +114,32 @@ listing.submitted ──▶ open_case ──▶ comm-Task "moderation.screen"
                                           │
                      ┌────────────────────┼────────────────────┐
                      ▼                    ▼                    ▼
-                 rules hit            llm.complete         unavailable
+                 rules hit            llm.complete         it BROKE
               (no LLM billed)      (schema-constrained)   (retry ×3, then
                      │                    │                ON_SCREENING_FAILURE)
-                     └────────┬───────────┘                    │
-                              ▼                                ▼
-                    approved / rejected              needs_review ──▶ human queue
-                              │                                          │
-                              ▼                                          ▼
-                    emit moderation.completed  ◀──────────────  moderator verdict
-                              │                                  (+ optional sanction)
-                              ▼
+                     │          ┌─────────┴─────────┐          │
+                     │          ▼                   ▼          ▼
+                     └──▶ approved/rejected   needs_review    dlq
+                              │              (the machine   (no verdict:
+                              │               ABSTAINED)     nothing looked)
+                              │                    │              │
+                              │                    ▼              │
+                              │              human queue          │
+                              │                    │              │
+                              ▼                    ▼              ▼
+                    emit moderation.completed ◀ moderator    rescan, once
+                              │                  verdict     the seam is
+                              ▼               (+ sanction)    repaired
                  the target module blocks itself
 ```
+
+The two "not decided" states are deliberately different tabs. `queued` is
+work a MODERATOR owes — the machine looked and abstained. `dlq` is work an
+ENGINEER owes — the screening seam failed and nothing looked at anything, so
+there is no verdict to read and nothing a moderator can act on. Read them
+apart (`cases?state=dlq&error_class=…`, and `queue_total` vs `dlq_total` on
+`stats`); adding them together is how a 78% screening failure rate spent
+twelve days on a live stand looking like a busy queue.
 
 ## Refusing a draft before it is published
 

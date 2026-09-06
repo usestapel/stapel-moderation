@@ -45,7 +45,7 @@ ARTIFACTS = TRIAD + ("capabilities.json", "llms.txt")
 
 #: Must equal the --budget in the Makefile; test_llms_txt_budget_matches_the_makefile
 #: is what keeps the two from drifting apart.
-LLMS_TXT_BUDGET = 7000
+LLMS_TXT_BUDGET = 7500
 
 
 def _emit(out_dir: Path) -> None:

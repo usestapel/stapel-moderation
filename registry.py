@@ -229,6 +229,15 @@ REASON_SCREENING_UNAVAILABLE = "screening_unavailable"
 REASON_SCREENING_HELD = "screening_held"
 REASON_LOW_CONFIDENCE = "low_confidence"
 REASON_MEDIA_UNAVAILABLE = "media_unavailable"
+#: The case's subject cannot be addressed at all — a draft case, whose
+#: ``target_key`` is a synthetic ``draft:<uuid>`` and names no row anywhere,
+#: or a target its owner has deleted. Nothing can be screened and nothing can
+#: be acted on, so the case is DISMISSED under this code rather than retried
+#: against a key that will never resolve.
+REASON_SUBJECT_GONE = "subject_gone"
+#: The screening seam failed and kept failing. Carried by the DLQ audit row,
+#: never by a verdict: "we could not check" is not a decision about content.
+REASON_SCREENING_FAILED = "screening_failed"
 
 _SYSTEM_REASONS: dict[str, dict] = {
     REASON_SCREENING_UNAVAILABLE: {
@@ -250,6 +259,18 @@ _SYSTEM_REASONS: dict[str, dict] = {
         "system": True,
     },
     REASON_MEDIA_UNAVAILABLE: {
+        "severity": 0,
+        "requires_description": False,
+        "applies_to": ["*"],
+        "system": True,
+    },
+    REASON_SUBJECT_GONE: {
+        "severity": 0,
+        "requires_description": False,
+        "applies_to": ["*"],
+        "system": True,
+    },
+    REASON_SCREENING_FAILED: {
         "severity": 0,
         "requires_description": False,
         "applies_to": ["*"],
@@ -464,8 +485,10 @@ __all__ = [
     "BUILTIN_REASONS",
     "BUILTIN_RULES",
     "REASON_MEDIA_UNAVAILABLE",
+    "REASON_SCREENING_FAILED",
     "REASON_SCREENING_UNAVAILABLE",
     "REASON_SCREENING_HELD",
+    "REASON_SUBJECT_GONE",
     "REASON_LOW_CONFIDENCE",
     "UnknownReason",
     "UnknownTargetType",

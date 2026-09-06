@@ -36,25 +36,51 @@ class CaseState(models.TextChoices):
     Members:
         OPEN: Created; awaiting screening or about to be queued.
         SCREENING: A ``moderation.screen`` comm-Task is in flight.
-        QUEUED: A human is needed — the automation abstained, failed, or the
-            policy demands a person.
+        QUEUED: A human is needed — the automation ABSTAINED, or the policy
+            demands a person. Not "the screener broke": see ``DLQ``.
         CLAIMED: A moderator holds a lease on the case.
+        DLQ: The screening seam failed and kept failing. The case is parked
+            with the class of the last error, out of the human queue, and
+            waits for the seam to be repaired — a re-screen brings it back.
         RESOLVED: A verdict was recorded and emitted. The only terminal state.
+
+    ``QUEUED`` and ``DLQ`` are both "not decided", and keeping them apart is
+    the whole reason ``DLQ`` exists. Until 0.7.0 a screening failure was
+    written down as a ``policy_default / needs_review`` verdict and the case
+    joined the human queue, so "the model looked and abstained" and "nothing
+    ever looked at this because a proxy was down" arrived at a moderator as
+    the same row, wearing the same verdict. On a client stand that produced
+    567 machine ``needs_review`` verdicts of which not one was a judgement,
+    and a queue of 122 cases that no human could act on and no dashboard
+    called broken.
     """
 
     OPEN = "open", "Open"
     SCREENING = "screening", "Screening"
     QUEUED = "queued", "Queued"
     CLAIMED = "claimed", "Claimed"
+    DLQ = "dlq", "Dead-lettered"
     RESOLVED = "resolved", "Resolved"
 
 
 #: States in which a case is still the live case for its target. The partial
 #: unique constraint over these is the whole idempotency mechanism (spec §5.3):
 #: a redelivered intake event finds the open case instead of opening a second.
+#: ``DLQ`` is one of them: a dead-lettered case is still THE case for its
+#: target, and letting a redelivered intake open a twin beside it would turn
+#: one broken seam into two rows nobody can reconcile.
 OPEN_STATES = (
     CaseState.OPEN,
     CaseState.SCREENING,
+    CaseState.QUEUED,
+    CaseState.CLAIMED,
+    CaseState.DLQ,
+)
+
+#: The subset a MODERATOR is expected to work. ``DLQ`` is deliberately not
+#: here: it is an engineer's queue, not a moderator's, and a console that
+#: mixes them makes the human queue look full of work no human can do.
+HUMAN_QUEUE_STATES = (
     CaseState.QUEUED,
     CaseState.CLAIMED,
 )
@@ -65,9 +91,23 @@ OPEN_STATES = (
 #: that succeeds has to be able to reopen the case it is appealing.
 CASE_TRANSITIONS = {
     CaseState.OPEN: (CaseState.SCREENING, CaseState.QUEUED, CaseState.RESOLVED),
-    CaseState.SCREENING: (CaseState.QUEUED, CaseState.RESOLVED, CaseState.OPEN),
-    CaseState.QUEUED: (CaseState.CLAIMED, CaseState.RESOLVED, CaseState.SCREENING),
+    CaseState.SCREENING: (
+        CaseState.QUEUED,
+        CaseState.RESOLVED,
+        CaseState.OPEN,
+        CaseState.DLQ,
+    ),
+    CaseState.QUEUED: (
+        CaseState.CLAIMED,
+        CaseState.RESOLVED,
+        CaseState.SCREENING,
+        CaseState.DLQ,
+    ),
     CaseState.CLAIMED: (CaseState.QUEUED, CaseState.RESOLVED),
+    # Out of the dead-letter park in every direction a person or a repaired
+    # seam could want: back onto the ladder (``rescan``), into the human
+    # queue (a moderator taking it by hand), or straight to a verdict.
+    CaseState.DLQ: (CaseState.SCREENING, CaseState.QUEUED, CaseState.RESOLVED),
     CaseState.RESOLVED: (CaseState.QUEUED,),
 }
 
@@ -151,6 +191,8 @@ class CaseEventKind(models.TextChoices):
     NOTIFIED = "notified", "Notification requested"
     RESCREENED = "rescreened", "Re-screened by the stuck sweep"
     ESCALATED = "escalated", "Given up on by the machine, left for a human"
+    DEAD_LETTERED = "dead_lettered", "Parked: the screening seam kept failing"
+    REVIVED = "revived", "Taken back out of the dead-letter park"
 
 
 class SanctionKind(models.TextChoices):
@@ -266,6 +308,20 @@ class Case(models.Model):
     #: field a queue filter sorts on so that "the machine gave up" is a
     #: readable state rather than the indistinguishable silence it is today.
     escalated_at = models.DateTimeField(null=True, blank=True, db_index=True)
+
+    #: When the case was parked in ``DLQ``. Set on the way in, cleared on the
+    #: way out, so "how long has this been dead-lettered" is a subtraction
+    #: rather than an audit-trail crawl.
+    dlq_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    #: The CLASS of the last screening failure — ``ContentUnavailable``,
+    #: ``ScreeningUnavailable``, ``TargetNotFound``. A closed, low-cardinality
+    #: vocabulary on purpose: it is what the DLQ tab groups by and what
+    #: ``metrics.record_screen_failure`` labels a counter with, and neither
+    #: survives a free-text field carrying a provider's stack trace.
+    last_error_class = models.CharField(max_length=64, blank=True, default="")
+    #: The last failure's message, truncated. For a person reading the card;
+    #: never parsed, never grouped by.
+    last_error = models.CharField(max_length=500, blank=True, default="")
 
     class Meta:
         db_table = "moderation_case"
@@ -540,6 +596,7 @@ class UserSanctionState(ProjectionModel):
 
 __all__ = [
     "CASE_TRANSITIONS",
+    "HUMAN_QUEUE_STATES",
     "OPEN_STATES",
     "TERMINAL_DECISIONS",
     "Appeal",

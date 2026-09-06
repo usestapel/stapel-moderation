@@ -333,3 +333,139 @@ def test_tasks_still_re_exports_the_schedule():
     assert tasks.get_moderation_beat_schedule is beat.get_moderation_beat_schedule
     assert tasks.BEAT_TASK_NAMES == beat.BEAT_TASK_NAMES
     assert tasks.RESCREEN_TASK_NAME == beat.RESCREEN_TASK_NAME
+
+
+# ── The key that names nothing ───────────────────────────────────────
+#
+# The defect this section holds down was measured, not imagined. On a client
+# stand on 2026-09-06: 69 cases of origin `draft`, each with
+# `screen_attempts=9` and `rescreen_attempts=3`, and 207 `screen_failed`
+# events all reading
+#
+#   ContentUnavailable("function 'listings.moderation_content' failed
+#    remotely: LookupError('listing draft:71bde8564c2148e09eb0d2b3b8d8ab80
+#    not found')")
+#
+# Every layer behaved as written. `screen_draft` minted a synthetic
+# `draft:<uuid>` key, exactly as documented. The sweep handed every QUEUED
+# case back to the ladder, exactly as documented. `fetch_content` called the
+# owner, the owner said "no such listing", and — because the cause does not
+# survive a NATS hop — `_is_not_found` read a 404 as a 503 and the ladder
+# retried it, exactly as its own docstring warned it would. Three correct
+# components, one impossible question, asked 207 times.
+
+
+def _draft_case(state=CaseState.QUEUED, **kwargs):
+    """A case shaped like `screen_draft` leaves one behind."""
+    from stapel_moderation.models import CaseOrigin
+    from stapel_moderation.services import DRAFT_KEY_PREFIX
+
+    return Case.objects.create(
+        target_type="listing",
+        target_key=f"{DRAFT_KEY_PREFIX}71bde8564c2148e09eb0d2b3b8d8ab80",
+        origin=CaseOrigin.DRAFT,
+        state=state,
+        **kwargs,
+    )
+
+
+@pytest.fixture
+def no_content_call(monkeypatch):
+    """Fail the test if anything asks a content function for this case.
+
+    The assertion of the whole section: the fix is not "the failure is
+    handled better", it is that the impossible question is never asked.
+    """
+    from stapel_moderation import services
+
+    def _forbidden(*args, **kwargs):
+        raise AssertionError(f"content function called with {args!r}")
+
+    monkeypatch.setattr(services, "fetch_content", _forbidden)
+    return _forbidden
+
+
+def test_a_draft_case_is_closed_not_re_screened(
+    content_double, no_content_call, settings
+):
+    """The 69 cases, and the 207 questions nobody could answer.
+
+    A draft case's key names no listing anywhere — that is what makes it a
+    draft — so the sweep must not hand it to a content function at all.
+    """
+    settings.STAPEL_MODERATION = {
+        **getattr(settings, "STAPEL_MODERATION", {}),
+        "RESCREEN_STUCK_AFTER": 3600,
+        "RESCREEN_MAX_ATTEMPTS": 3,
+    }
+    from stapel_moderation.tasks import rescreen_stuck_cases
+
+    case = _age(_draft_case(), hours=48)
+
+    assert rescreen_stuck_cases() == 0, "not a re-screen"
+
+    case.refresh_from_db()
+    assert case.state == CaseState.RESOLVED
+    assert case.last_verdict.decision == VerdictDecision.DISMISSED
+    assert case.last_verdict.reason_code == "subject_gone"
+    assert not case.events.filter(kind=CaseEventKind.SCREEN_FAILED).exists()
+
+
+def test_the_screening_task_never_asks_about_a_synthetic_key(
+    content_double, no_content_call
+):
+    """The other door into the same impossible question.
+
+    ``rescan`` on a draft case, or a redelivered screen request, reached
+    ``fetch_content`` directly. Nine screen attempts per case came through
+    here.
+    """
+    from stapel_moderation.tasks import screen_case
+
+    case = _draft_case(state=CaseState.OPEN)
+
+    result = screen_case({"case_id": str(case.id)})
+
+    assert result["reason"] == "subject_gone"
+    case.refresh_from_db()
+    assert case.state == CaseState.RESOLVED
+
+
+def test_closing_a_draft_case_instructs_no_target_module(
+    content_double, captured_events
+):
+    """A verdict topic is an INSTRUCTION, and there is nobody to instruct.
+
+    Emitting ``moderation.completed`` about a ``draft:<uuid>`` key gives a
+    sibling service a payload it can only log forever or redeliver forever —
+    which is why ``screen_draft`` suppresses it and why closing one here must
+    suppress it too.
+    """
+    from stapel_moderation import services
+
+    case = _draft_case()
+    services.close_subject_gone(case)
+
+    assert not [e for e in captured_events if e.event_type == "moderation.completed"]
+
+
+def test_a_real_target_that_vanished_is_closed_by_the_ladder(content_double):
+    """Not only synthetic keys: a listing whose owner deleted it.
+
+    The content double answers ``LookupError`` for any id but its own, which
+    is what ``listings.moderation_content`` does. In-process the cause
+    survives and ``fetch_content`` answers ``TargetNotFound``; over a fleet
+    transport it does not, which is the subject of the ``_is_not_found``
+    tests in ``test_intake.py``.
+    """
+    from stapel_moderation.tasks import screen_case
+
+    case = Case.objects.create(
+        target_type="listing", target_key="9999", state=CaseState.OPEN
+    )
+
+    result = screen_case({"case_id": str(case.id)})
+
+    assert result["reason"] == "target_not_found"
+    case.refresh_from_db()
+    assert case.state == CaseState.RESOLVED

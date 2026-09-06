@@ -4,6 +4,149 @@ All notable changes to stapel-moderation are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Pre-1.0 semver: **minor = breaking**, patch = compatible.
 
+## [0.7.0] — 2026-09-06
+
+### A failure is not a verdict
+
+**Breaking: a screening failure no longer produces a `needs_review` verdict,
+and no longer lands in the human queue.** It lands in a new case state,
+`dlq`, carrying the class of what broke.
+
+The behaviour this replaces was defensible one line at a time. A screening
+that could not run applied `ON_SCREENING_FAILURE = "hold"`, which recorded
+`policy_default / needs_review / screening_unavailable` and queued the case
+for a person: nothing published unscreened, every failure written down,
+`W001` printed at every boot. What none of that says is that no machine had
+looked at anything — so a machine verdict claiming a machine wanted a person
+was generated into the audit trail, into DSA Art. 17 statements of reasons,
+and into the moderator queue, where it was indistinguishable from a screener
+that had genuinely abstained.
+
+Measured on a client stand on 2026-09-06: **567 `policy_default needs_review`
+verdicts, not one of which was a judgement**, and 122 queued cases no
+moderator could act on. The queue looked busy. It was an outage.
+
+So, three states where there was one:
+
+* `queued` — a human is needed. The machine abstained, or the policy asks
+  for a person. Unchanged.
+* `dlq` — **new**. The screening seam failed and kept failing. Out of the
+  human queue, carrying `last_error_class` and `dlq_at`, and holding **no
+  verdict at all**, because "we could not check" is not a decision about
+  content.
+* `resolved` — still the only terminal state.
+
+`ON_SCREENING_FAILURE` keeps its three values and `"approve"` / `"reject"`
+are untouched: those are real decisions an owner chose in advance, they act
+on the target, and a rejection must stay appealable. Only `"hold"` changed,
+and it still holds.
+
+The synchronous draft door changed the same way: an unavailable screener
+still answers `allowed=False` — unavailability is never permission — but it
+no longer persists a case and a verdict for it. A refusal gets a case when
+somebody DECIDED to refuse.
+
+### The key that named nothing
+
+The same stand carried 69 cases of origin `draft`, each with
+`screen_attempts=9`, and 207 `screen_failed` events reading
+
+    ContentUnavailable("function 'listings.moderation_content' failed
+     remotely: LookupError('listing draft:71bde8564c… not found')")
+
+Every component behaved as documented. `screen_draft` minted a synthetic
+`draft:<uuid>` target key, which is what makes a draft case a draft case.
+`tasks.rescreen_stuck_cases` handed every QUEUED case back to the ladder
+without asking what its key meant. `fetch_content` called the owner, the
+owner said "no such listing", and `_is_not_found` — whose docstring had
+warned about exactly this since 0.4.0 — could not see it, because
+`__cause__` does not survive a NATS hop. A 404 read as a 503 and the ladder
+retried it, three attempts a time, three times a case.
+
+Three fixes, at the three places:
+
+* **`services.target_is_addressable(case)`** — asked before the call, not
+  discovered as a remote error. A case whose key cannot be handed to a
+  content function is CLOSED as `dismissed / subject_gone` (new system
+  reason), with the verdict event suppressed when the key is synthetic:
+  instructing a sibling module about a `draft:<uuid>` it has never owned is
+  a payload it can only log forever or redeliver forever.
+* **`_is_not_found` reads the flattened transport.** Core rebuilds a remote
+  failure as `FunctionCallError("… failed remotely: LookupError('…')")` with
+  no cause attached, so the exception NAME is the one structured thing that
+  survives. It is matched only in the `failed remotely:` tail, so a provider
+  that says "not found" in prose cannot dismiss somebody's case. This stays
+  a string match until comm carries structured error codes — that is core's
+  work, and the docstring says so.
+* **The stuck sweep no longer asks impossible questions**, and now sweeps
+  `dlq` as well as `queued`: a dead letter is a case waiting for a REPAIR,
+  and retrying it on the existing backoff and cap is how the sweep finds out
+  the repair landed.
+
+### Screening, as a number that says WHICH seam
+
+`moderation_screen_total{outcome="unavailable"}` could not tell two
+unrelated faults apart, and the stand was running both at once: an
+unreachable LLM proxy (199 events) and a content function asked for a key
+that names nothing (207). An engineer alarming on that series would have
+repaired the wrong one.
+
+* `moderation_screen_failed_total{target_type,error_class}` — the series to
+  alarm on. The label says who to wake. Recorded from **both** doors, and
+  from `fetch_content`, whose failures reached no screening metric at all.
+* `moderation_case_dlq_total{target_type,error_class}` — cases parked, once
+  per case rather than once per attempt.
+* Both declared at zero by `metrics.declare_series`, because a counter that
+  has never been incremented does not fire an alert.
+
+### `stapel_moderation.E009` / `W009` — one place a provider is named
+
+Eight of the stand's failures read *"Anthropic API key not configured — set
+`STAPEL_AGENT['ANTHROPIC_API_KEY']`"* while the fleet was configured for an
+OpenAI-compatible endpoint. `llm.complete` is called by name over comm and
+executes wherever the agent lives, so there are two places a provider can be
+named — the agent's `DEFAULT_PROVIDER`, and `STAPEL_MODERATION['LLM_PROVIDER']`
+here, which overrides it per call. When they disagree, screening routes to a
+provider nobody credentialed and the failure looks exactly like the outage
+running next to it.
+
+`W009` fires whenever `LLM_PROVIDER` is set at all — the shipped `""` means
+"go where the agent already goes", which is a single source of truth by
+construction. `E009` fires on the case this process can PROVE: the agent runs
+in the same service and the named provider's key is empty there.
+
+### Added
+
+* `CaseState.DLQ`, `HUMAN_QUEUE_STATES`, and the `dlq_at` /
+  `last_error_class` / `last_error` columns (migration `0005`).
+* `CaseEventKind.DEAD_LETTERED` / `REVIVED`.
+* `services.dead_letter_case`, `services.close_subject_gone`,
+  `services.target_is_addressable`, `services.error_class_of`,
+  `services.ERROR_CLASSES`.
+* Reason codes `subject_gone` and `screening_failed`.
+* `GET cases?state=dlq&error_class=…` — the dead-letter tab, as filters on
+  the one list endpoint rather than a second route.
+* `GET stats` gains `queue_total`, `dlq_total` and `dlq_by_error_class`.
+  Separate headline numbers on purpose: the first is work a moderator owes,
+  the second is work an engineer owes, and adding them together is how a
+  broken seam spent twelve days looking like a busy queue.
+* The queue row (`CasePresenter`) gains `dlq_at`, `last_error_class`,
+  `last_error` and `escalated_at`, so the DLQ tab groups and sorts without
+  opening every card.
+* `POST cases/<id>/rescan` revives a dead-lettered case.
+* **`manage.py moderation_rescreen`** — `--state dlq|queued`,
+  `--error-class`, `--origin`, `--target-type`, `--limit`, `--dry-run`. The
+  operator's button for "the seam is repaired, empty the park", and the way
+  pre-0.7.0 screening-failure cases are moved.
+
+### Not done, deliberately
+
+Migration `0005` rewrites no existing verdict. An append-only audit trail
+that feeds statements of reasons is not something a schema migration gets to
+edit, even to correct it. Move those cases with `moderation_rescreen` and
+they reach the new states the way every other case reaches them, with the
+audit rows to show it.
+
 ## [0.6.3] — 2026-09-03
 
 ### Screening becomes a number

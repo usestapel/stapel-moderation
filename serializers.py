@@ -130,12 +130,21 @@ class KeysetQuerySerializer(serializers.Serializer):
 
 
 class CaseQuerySerializer(KeysetQuerySerializer):
+    """Filters for the cross-target queue.
+
+    ``state=dlq`` plus ``error_class`` is the dead-letter tab: everything the
+    screening seam gave up on, grouped by which seam it was. Kept as filters
+    on the one list endpoint rather than a second route, because the DLQ is
+    the same table read with a different question.
+    """
+
     state = serializers.CharField(required=False, allow_blank=True, default="")
     target_type = serializers.CharField(required=False, allow_blank=True, default="")
     reason_code = serializers.CharField(required=False, allow_blank=True, default="")
     scope_key = serializers.CharField(required=False, allow_blank=True, default="")
     severity_min = serializers.IntegerField(required=False, allow_null=True)
     subject_user_id = serializers.UUIDField(required=False, allow_null=True)
+    error_class = serializers.CharField(required=False, allow_blank=True, default="")
 
 
 class SanctionQuerySerializer(KeysetQuerySerializer):

@@ -51,9 +51,9 @@ claim that every key is settable from a shell:
 | SCREEN_TIMEOUT_SECONDS | env | Timeout of the `llm.complete` call. Deliberately not core's 5s `FUNCTION_TIMEOUT` — a completion never finishes in five seconds. | no | `60` |
 | CONTENT_TIMEOUT_SECONDS | env | Timeout of a target's `content_function`. | no | `10` |
 | LLM_MODEL | env | Size passed to `llm.complete`: `small`/`medium`/`large`. | no | `medium` |
-| LLM_PROVIDER | env | Provider name; empty lets `llm.complete` pick its configured default. | no | `""` |
+| LLM_PROVIDER | env | Provider name; empty (the default, and the recommendation) lets `llm.complete` follow the agent's own `DEFAULT_PROVIDER`, so the fleet names a provider in ONE place. Naming one here overrides it per call and prints `moderation.W009`; naming one whose credentials are empty in a co-installed agent is `moderation.E009`. | no | `""` |
 | LLM_CONFIDENCE_FLOOR | env | Below it the decision is forced to `needs_review` whatever the model said. | no | `0.7` |
-| ON_SCREENING_FAILURE | env | `hold` \| `approve` \| `reject` when the screener could not answer. **Closed default `hold`**: the human queue IS the fallback. Anything else prints `moderation.W001`. | no | `hold` |
+| ON_SCREENING_FAILURE | env | `hold` \| `approve` \| `reject` when the screener could not answer. **Closed default `hold`**: the case is DEAD-LETTERED (`state=dlq`) with no verdict — "we could not check" is not a decision about content, and since 0.7.0 it is not written down as one. Anything else prints `moderation.W001`. | no | `hold` |
 | ON_SCREENING_UNAVAILABLE | env | Same vocabulary, for "no screener configured at all". | no | `hold` |
 | AUTO_RESOLVE_STALE_QUEUE | env | Seconds after which an unreviewed QUEUED case auto-approves. `None` = never, and never is the point. A number prints `moderation.W002`. | no | `None` |
 
