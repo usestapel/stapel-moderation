@@ -36,7 +36,7 @@ from stapel_core.comm import task_handler
 
 # Re-exported so a caller can catch it without importing two modules, and so
 # the "raise, never return" contract is visible from this file.
-from .screening import ScreeningUnavailable  # noqa: F401  (re-export)
+from .screening import MediaUnresolvable, ScreeningUnavailable  # noqa: F401  (re-export)
 from .services import SCREEN_TASK
 
 logger = logging.getLogger(__name__)
@@ -47,6 +47,7 @@ logger = logging.getLogger(__name__)
 from .beat import (  # noqa: E402,F401  (re-export)
     BEAT_TASK_NAMES,
     EXPIRE_TASK_NAME,
+    ORPHAN_TASK_NAME,
     PURGE_TASK_NAME,
     REARM_TASK_NAME,
     RESCREEN_TASK_NAME,
@@ -80,7 +81,7 @@ def screen_case(payload: dict) -> dict:
 
     from . import services
     from .conf import moderation_settings
-    from .models import Case, CaseState, VerdictDecision, VerdictSource
+    from .models import Case, CaseState, VerdictDecision
     from .registry import resolve_policy
     from .screening import get_screener
 
@@ -132,16 +133,15 @@ def screen_case(payload: dict) -> dict:
         _content_metrics.record_screen_failure(case.target_type, exc)
         raise
     except services.TargetNotFound:
-        # Permanent: retrying cannot conjure the target back.
+        # Permanent: retrying cannot conjure the target back. Closed through
+        # `close_subject_gone` under `subject_gone` — the code the registry
+        # declares for exactly this ("a target its owner has deleted"). Until
+        # 0.8.0 this branch wrote the bare string `target_not_found`, which is
+        # in no registry, cannot be translated, and split one fact across two
+        # names that no query joins.
         logger.info("moderation.screen: target gone for case %s", case.id)
-        services.resolve_case(
-            case,
-            decision=VerdictDecision.DISMISSED,
-            source=VerdictSource.POLICY_DEFAULT,
-            reason_code="target_not_found",
-            note="The moderated target no longer exists.",
-        )
-        return {"decision": VerdictDecision.DISMISSED, "reason": "target_not_found"}
+        services.close_subject_gone(case)
+        return {"decision": VerdictDecision.DISMISSED, "reason": "subject_gone"}
 
     reports = list(case.reports.values_list("reason_code", flat=True))
     screener = get_screener()
@@ -155,6 +155,34 @@ def screen_case(payload: dict) -> dict:
     _started = _time.monotonic()
     try:
         result = screener(case, content, reports=reports)
+    except MediaUnresolvable as exc:
+        # The case declares photos and not one of them resolved. NOT a raise
+        # out of this handler: raising would climb the retry ladder, and a ref
+        # `cdn.describe` does not know will not become known on attempt two.
+        # NOT a verdict either — that is what this release removes. The case is
+        # parked with the refs that failed, and `ON_MEDIA_UNAVAILABLE` decides
+        # whether a moderator sees the park.
+        _metrics.record_screen(
+            case.target_type,
+            _metrics.OUTCOME_UNAVAILABLE,
+            seconds=_time.monotonic() - _started,
+        )
+        _metrics.record_screen_failure(case.target_type, "MediaUnavailable")
+        surfaced = (
+            str(moderation_settings.ON_MEDIA_UNAVAILABLE or "dlq").lower() == "review"
+        )
+        services.park_unscreened(
+            case,
+            error=str(exc),
+            error_class="MediaUnavailable",
+            visible_to_moderators=surfaced,
+            media_refs=list(exc.refs),
+        )
+        return {
+            "case_id": str(case.id),
+            "parked": "media_unavailable",
+            "media_refs": list(exc.refs),
+        }
     except Exception as exc:
         _metrics.record_screen(
             case.target_type,
@@ -332,6 +360,100 @@ def sweep_stale_cases() -> dict:
         auto_resolved,
     )
     return {"released": released, "stalled": stalled, "auto_resolved": auto_resolved}
+
+
+def sweep_orphaned_cases() -> dict:
+    """Close undecided cases whose subject no longer exists.
+
+    **A case must not outlive its subject.** Nothing in this module was
+    enforcing that. The two places the question "does the target still exist?"
+    was ever asked are both dead ends for a case that has been sitting a while:
+
+    * ``screen_case`` asks it once, on the way through the ladder, and a
+      screening that already happened is never repeated by itself;
+    * ``rescreen_stuck_cases`` asks it again on backoff — until
+      ``RESCREEN_MAX_ATTEMPTS``, after which the case is ESCALATED and the
+      sweep's own ``escalated_at__isnull=True`` filter excludes it **forever**.
+
+    A deleted target emits no fact this module subscribes to, so after the cap
+    nothing is left to notice. Measured on a live stand: 52 cases in the human
+    queue, 51 of them escalated at ``rescreen_attempts=3``, and 49 pointing at
+    listings that had been deleted since — a moderator queue that was 94%
+    cases about content that does not exist.
+
+    So the probe is a job of its own, and the reason it is not a branch inside
+    ``rescreen_stuck_cases`` is the cap: that cap bounds BILLING, because a
+    re-screen pays for a completion. This asks a sibling module whether a row
+    exists. It costs one content call, it can only ever CLOSE a case, and it
+    never renders a judgement about content — so escalated cases are
+    deliberately in scope, and being given up on by the machine stops meaning
+    "exempt from the truth".
+
+    What it will not do:
+
+    * touch ``CLAIMED`` — a moderator holding the lease outranks the clock;
+    * treat ``ContentUnavailable`` as absence — a sibling that is DOWN says
+      nothing about whether the row exists, and collapsing the two is how a
+      restart becomes a mass dismissal;
+    * probe an evidence-based target type — its subject is an attestation
+      stored HERE, and it cannot be deleted by anyone else.
+    """
+    from . import services
+    from .conf import moderation_settings
+    from .models import Case, CaseState
+    from .registry import resolve_policy_lenient
+
+    window = int(moderation_settings.ORPHAN_CHECK_AFTER or 0)
+    if window <= 0:
+        return {"probed": 0, "closed": 0, "unavailable": 0}
+
+    batch = int(moderation_settings.ORPHAN_CHECK_BATCH or 0) or 200
+    cutoff = timezone.now() - timedelta(seconds=window)
+    candidates = (
+        Case.objects.filter(
+            state__in=(CaseState.QUEUED, CaseState.DLQ), updated_at__lt=cutoff
+        )
+        .order_by("updated_at")
+        .values_list("pk", flat=True)[:batch]
+    )
+
+    probed = closed = unavailable = 0
+    for case_id in list(candidates):
+        case = Case.objects.filter(pk=case_id).first()
+        if case is None or case.state not in (CaseState.QUEUED, CaseState.DLQ):
+            continue
+        if not services.target_is_addressable(case):
+            # A draft case. `rescreen_stuck_cases` already closes these and
+            # its answer needs no round trip.
+            continue
+        policy = resolve_policy_lenient(case.target_type)
+        if policy.get("evidence") or not policy.get("content_function"):
+            continue
+        probed += 1
+        try:
+            services.fetch_content(case.target_type, case.target_key, policy=policy)
+        except services.TargetNotFound:
+            try:
+                services.close_subject_gone(case)
+                closed += 1
+            except services.ModerationError:
+                logger.exception(
+                    "moderation: could not close orphaned case %s", case.id
+                )
+        except services.ContentUnavailable:
+            # The owner could not answer. That is not "the subject is gone",
+            # and the next run asks again.
+            unavailable += 1
+
+    if probed:
+        logger.info(
+            "moderation orphan sweep: %s case(s) probed, %s closed as "
+            "subject_gone, %s owner(s) unreachable",
+            probed,
+            closed,
+            unavailable,
+        )
+    return {"probed": probed, "closed": closed, "unavailable": unavailable}
 
 
 def rescreen_stuck_cases() -> int:
@@ -615,6 +737,7 @@ except ImportError:
     pass
 else:
     sweep_stale_cases = shared_task(name=SWEEP_TASK_NAME)(sweep_stale_cases)
+    sweep_orphaned_cases = shared_task(name=ORPHAN_TASK_NAME)(sweep_orphaned_cases)
     rescreen_stuck_cases = shared_task(name=RESCREEN_TASK_NAME)(rescreen_stuck_cases)
     rearm_active_sanctions = shared_task(name=REARM_TASK_NAME)(rearm_active_sanctions)
     expire_sanctions = shared_task(name=EXPIRE_TASK_NAME)(expire_sanctions)
@@ -624,10 +747,12 @@ else:
 __all__ = [
     "BEAT_TASK_NAMES",
     "EXPIRE_TASK_NAME",
+    "ORPHAN_TASK_NAME",
     "PURGE_TASK_NAME",
     "REARM_TASK_NAME",
     "RESCREEN_TASK_NAME",
     "SWEEP_TASK_NAME",
+    "MediaUnresolvable",
     "ScreeningUnavailable",
     "apply_screening_failure",
     "expire_sanctions",
@@ -636,5 +761,6 @@ __all__ = [
     "rearm_active_sanctions",
     "rescreen_stuck_cases",
     "screen_case",
+    "sweep_orphaned_cases",
     "sweep_stale_cases",
 ]

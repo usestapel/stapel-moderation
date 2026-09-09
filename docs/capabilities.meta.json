@@ -398,6 +398,13 @@
       "kind": "factory",
       "intent": "Return expired claims and stalled screenings to the queue. Never renders a verdict — that is the whole difference from the predecessor system's stale sweeper."
     },
+    "sweep_orphaned_cases": {
+      "kind": "factory",
+      "intent": "Ask each undecided case's target module whether the subject still exists, and close the ones that no longer do as dismissed / subject_gone. Escalated cases are in scope on purpose: the re-screen cap bounds billing, not truth.",
+      "instead_of": [
+        "leaving a case in the moderator queue after its listing was deleted"
+      ]
+    },
     "rescreen_stuck_cases": {
       "kind": "factory",
       "intent": "Hand cases nothing else can move — the machine abstained, or the owner edited the target while its case was still open — back to the screening ladder, with exponential backoff and a cap that surfaces a permanently failing case instead of retrying it forever. Re-screens; never decides."
@@ -437,6 +444,13 @@
       "intent": "The newest attestation on file for an evidence-based target — what a case card, a re-screen and an appeal read, because there is no owner to ask.",
       "instead_of": [
         "Report.objects.filter(...).first().evidence"
+      ]
+    },
+    "park_unscreened": {
+      "kind": "factory",
+      "intent": "Record that a case could NOT be screened — the dlq stamps, the audit row and the failure detail — and write no verdict for it. visible_to_moderators decides whether the park sits in the dlq state or stays queued and marked.",
+      "instead_of": [
+        "recording a policy_default needs_review verdict for a screening that never happened"
       ]
     },
     "dead_letter_case": {

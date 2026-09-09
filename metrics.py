@@ -85,10 +85,15 @@ DLQ_METRIC = "moderation_case_dlq_total"
 #: than allowed to invent a series.
 ERROR_CLASS_CONTENT = "ContentUnavailable"
 ERROR_CLASS_SCREENING = "ScreeningUnavailable"
+#: Every declared media ref failed to resolve. Its own class rather than a
+#: shade of ScreeningUnavailable: nothing was retried, and the repair is a CDN
+#: seam rather than a provider.
+ERROR_CLASS_MEDIA = "MediaUnavailable"
 ERROR_CLASS_TARGET_GONE = "TargetNotFound"
 ERROR_CLASSES = (
     ERROR_CLASS_CONTENT,
     ERROR_CLASS_SCREENING,
+    ERROR_CLASS_MEDIA,
     ERROR_CLASS_TARGET_GONE,
     "InvalidTransition",
     "other",
@@ -245,6 +250,7 @@ def record_draft_fail_open(target_type: str, reason_code: str = "") -> None:
 
 __all__ = [
     "DLQ_METRIC",
+    "ERROR_CLASS_MEDIA",
     "DRAFT_FAIL_OPEN_METRIC",
     "DRAFT_SCREEN_METRIC",
     "ERROR_CLASSES",

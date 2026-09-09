@@ -618,10 +618,94 @@ def error_class_of(exc_or_name) -> str:
 ERROR_CLASSES = (
     "ContentUnavailable",
     "ScreeningUnavailable",
+    "MediaUnavailable",
     "TargetNotFound",
     "InvalidTransition",
     "other",
 )
+
+
+def park_unscreened(
+    case,
+    *,
+    error: str = "",
+    error_class: str = "",
+    actor_id=None,
+    visible_to_moderators: bool = False,
+    **detail,
+) -> None:
+    """Record that a case could NOT be screened, and write no verdict for it.
+
+    The one writer of the dead-letter stamps (``dlq_at``,
+    ``last_error_class``, ``last_error``) and of the ``DEAD_LETTERED`` audit
+    row. Everything a failed screening leaves behind goes through here, so
+    "we could not check this" has exactly one shape in the database whatever
+    broke.
+
+    ``visible_to_moderators`` is the only axis, and it decides the STATE, not
+    the record:
+
+    ``False`` (the park)
+        the case moves to ``DLQ``. Out of ``HUMAN_QUEUE_STATES``, so the
+        moderator console never shows it; the DLQ tab and
+        ``moderation_case_dlq_total`` do.
+
+    ``True`` (the park, surfaced)
+        the case moves to ``QUEUED`` and carries the same stamps. A console
+        renders ``dlq_at`` + ``last_error_class`` as "could not screen" —
+        visually distinct from a verdict, because there is none to render.
+
+    ``detail`` is written verbatim into the audit row's payload. It is where
+    the FACTS of the failure live — which media refs did not resolve, which
+    function timed out — and it is not optional in spirit: a park that cannot
+    name what broke reports a seam nobody can find.
+
+    Idempotent: a case already parked has its error stamp refreshed and its
+    ``dlq_at`` left where it was, so "since when" survives a second failure.
+    """
+    from . import metrics as _metrics
+
+    was_parked = case.dlq_at is not None
+    target_state = CaseState.QUEUED if visible_to_moderators else CaseState.DLQ
+    # No fact is emitted for the DLQ park and none should be: a dead letter is
+    # this module's own operational state, not something a target module must
+    # act on. The audit row and the counter are the record. The surfaced park
+    # DOES announce itself, because a case entering the human queue is exactly
+    # what `moderation.case.queued` means.
+    with mutate_and_emit() as emit_event:
+        case = Case.objects.select_for_update().get(pk=case.pk)
+        if case.state == CaseState.RESOLVED:
+            return
+        if target_state == CaseState.QUEUED:
+            _queue(case, reason_code=error_class or "", emit_event=emit_event)
+        elif case.state != CaseState.DLQ:
+            transition(case, CaseState.DLQ, actor_id=actor_id, error_class=error_class)
+        Case.objects.filter(pk=case.pk).update(
+            dlq_at=case.dlq_at or timezone.now(),
+            last_error_class=(error_class or "other")[:64],
+            last_error=str(error or "")[:500],
+            claimed_by=None,
+            claimed_until=None,
+        )
+        case.refresh_from_db()
+        _log(
+            case,
+            CaseEventKind.DEAD_LETTERED,
+            actor_id=actor_id,
+            error_class=error_class,
+            error=str(error or "")[:500],
+            reason_code=REASON_SCREENING_FAILED,
+            **detail,
+        )
+    if not was_parked:
+        _metrics.record_dead_letter(case.target_type, error_class)
+    logger.warning(
+        "moderation: case %s parked unscreened (%s, state=%s) — the screening "
+        "seam is failing, not the content",
+        case.id,
+        error_class or "other",
+        case.state,
+    )
 
 
 def dead_letter_case(case, *, error: str = "", error_class: str = "", actor_id=None) -> None:
@@ -639,42 +723,17 @@ def dead_letter_case(case, *, error: str = "", error_class: str = "", actor_id=N
 
     Idempotent: a case already parked has its error stamp refreshed and its
     ``dlq_at`` left where it was, so "since when" survives a second failure.
-    """
-    from . import metrics as _metrics
 
-    was_parked = case.state == CaseState.DLQ
-    # No fact is emitted and none should be: a dead letter is this module's
-    # own operational state, not something a target module must act on. The
-    # audit row and the counter are the record.
-    with transaction.atomic():
-        case = Case.objects.select_for_update().get(pk=case.pk)
-        if case.state == CaseState.RESOLVED:
-            return
-        if case.state != CaseState.DLQ:
-            transition(case, CaseState.DLQ, actor_id=actor_id, error_class=error_class)
-        Case.objects.filter(pk=case.pk).update(
-            dlq_at=case.dlq_at or timezone.now(),
-            last_error_class=(error_class or "other")[:64],
-            last_error=str(error or "")[:500],
-            claimed_by=None,
-            claimed_until=None,
-        )
-        case.refresh_from_db()
-        _log(
-            case,
-            CaseEventKind.DEAD_LETTERED,
-            actor_id=actor_id,
-            error_class=error_class,
-            error=str(error or "")[:500],
-            reason_code=REASON_SCREENING_FAILED,
-        )
-    if not was_parked:
-        _metrics.record_dead_letter(case.target_type, error_class)
-    logger.warning(
-        "moderation: case %s dead-lettered (%s) — the screening seam is "
-        "failing, not the content",
-        case.id,
-        error_class or "other",
+    Since 0.8.0 this is :func:`park_unscreened` with the park invisible to
+    moderators — the published name is kept because it is the one every caller
+    and every runbook uses.
+    """
+    park_unscreened(
+        case,
+        error=error,
+        error_class=error_class,
+        actor_id=actor_id,
+        visible_to_moderators=False,
     )
 
 
@@ -2006,6 +2065,7 @@ __all__ = [
     "claim_case",
     "close_subject_gone",
     "dead_letter_case",
+    "park_unscreened",
     "error_class_of",
     "fetch_content",
     "issue_sanction",

@@ -69,6 +69,24 @@ DEFAULTS = {
     "ON_SCREENING_FAILURE": "hold",
     # Same vocabulary, for "no screener is configured at all".
     "ON_SCREENING_UNAVAILABLE": "hold",
+    # What to do with a case that DECLARES photos when not one of its refs
+    # resolves. Never a verdict either way — no machine looked, so there is
+    # nothing to state reasons about (the 0.7.0 rule, applied to the other
+    # half of "could not screen"). The axis is only who SEES the parked case:
+    #
+    #   "dlq"    park it out of the moderator queue, stamped with the refs
+    #            that failed. The queue stays a list of things a person can
+    #            act on; the cost is that a listing whose photos nobody can
+    #            fetch is invisible until an engineer repairs the seam and the
+    #            re-screen sweep brings it back.
+    #   "review" park it with the same stamps but leave it QUEUED, so a
+    #            moderator sees it as "could not screen" (dlq_at set, no
+    #            verdict) next to real abstentions. The cost is the queue
+    #            refilling with rows whose photos the moderator cannot load
+    #            either — the shape that made this stand's queue 94% noise.
+    #
+    # Default "dlq": it is the one that honours the ruling of 2026-09-06.
+    "ON_MEDIA_UNAVAILABLE": "dlq",
     # Seconds after which a QUEUED case would be auto-resolved. None means
     # never, and never is the point: legacy's stale-sweeper auto-approved
     # everything a human had not reached, needs_review included, so human
@@ -89,6 +107,22 @@ DEFAULTS = {
     # for a human, not retried forever and not auto-decided.
     "RESCREEN_MAX_ATTEMPTS": 3,
     "RESCREEN_SCHEDULE": {"minute": "*/15"},
+    # ── A case must not outlive its subject (tasks.sweep_orphaned_cases) ──
+    # Seconds an undecided case may sit before this module ASKS the target
+    # module whether the subject still exists. A deleted listing emits no
+    # fact this module subscribes to, and the only other place the question
+    # is ever asked is a re-screen — which `rescreen_stuck_cases` stops
+    # doing at RESCREEN_MAX_ATTEMPTS, permanently. On a live stand that left
+    # 49 of 52 queued cases pointing at listings that no longer existed, all
+    # of them past the cap and therefore unreachable by every job the module
+    # had. This probe is a content call, never an LLM call, so the cap that
+    # exists to bound BILLING does not apply to it and escalated cases are
+    # deliberately in scope. 0 disables it.
+    "ORPHAN_CHECK_AFTER": 3600,
+    # Cases probed per run. The job asks a sibling module once per case, so
+    # the bound is on the sibling, not on us.
+    "ORPHAN_CHECK_BATCH": 200,
+    "ORPHAN_SCHEDULE": {"minute": "*/20"},
 
     # ── Queue (spec §7) ──────────────────────────────────────────────
     # A claim is a lease, not a lock: it expires and the case returns to

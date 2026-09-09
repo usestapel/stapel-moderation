@@ -28,6 +28,7 @@ from __future__ import annotations
 #: Stable names a beat schedule references (never renamed by a refactor).
 SWEEP_TASK_NAME = "stapel_moderation.tasks.sweep_stale_cases"
 RESCREEN_TASK_NAME = "stapel_moderation.tasks.rescreen_stuck_cases"
+ORPHAN_TASK_NAME = "stapel_moderation.tasks.sweep_orphaned_cases"
 REARM_TASK_NAME = "stapel_moderation.tasks.rearm_active_sanctions"
 EXPIRE_TASK_NAME = "stapel_moderation.tasks.expire_sanctions"
 PURGE_TASK_NAME = "stapel_moderation.tasks.purge_expired_cases"
@@ -35,6 +36,7 @@ PURGE_TASK_NAME = "stapel_moderation.tasks.purge_expired_cases"
 BEAT_TASK_NAMES = (
     SWEEP_TASK_NAME,
     RESCREEN_TASK_NAME,
+    ORPHAN_TASK_NAME,
     REARM_TASK_NAME,
     EXPIRE_TASK_NAME,
     PURGE_TASK_NAME,
@@ -67,6 +69,10 @@ def get_moderation_beat_schedule() -> dict:
             "task": RESCREEN_TASK_NAME,
             "schedule": crontab(**dict(moderation_settings.RESCREEN_SCHEDULE or {})),
         },
+        "moderation-sweep-orphaned-cases": {
+            "task": ORPHAN_TASK_NAME,
+            "schedule": crontab(**dict(moderation_settings.ORPHAN_SCHEDULE or {})),
+        },
         "moderation-rearm-sanctions": {
             "task": REARM_TASK_NAME,
             "schedule": crontab(**dict(moderation_settings.REARM_SCHEDULE or {})),
@@ -85,6 +91,7 @@ def get_moderation_beat_schedule() -> dict:
 __all__ = [
     "BEAT_TASK_NAMES",
     "EXPIRE_TASK_NAME",
+    "ORPHAN_TASK_NAME",
     "PURGE_TASK_NAME",
     "REARM_TASK_NAME",
     "RESCREEN_TASK_NAME",

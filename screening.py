@@ -40,6 +40,35 @@ class ScreeningUnavailable(Exception):
     """
 
 
+class MediaUnresolvable(Exception):
+    """The case declares media and NOT ONE ref could be resolved.
+
+    Deliberately **not** a :class:`ScreeningUnavailable` subclass, and the
+    difference is the whole point. ``ScreeningUnavailable`` means *try again* —
+    a provider blinked, a proxy was down — and it climbs the retry ladder. A
+    ref that ``cdn.describe`` does not know will not become known on the second
+    attempt, so this one must never reach the ladder.
+
+    It is a raise rather than a returned ``ScreeningResult`` because the
+    alternative is minting ``policy_default / needs_review /
+    media_unavailable``: a machine verdict saying "a person must look", issued
+    by a code path where no machine looked at anything. That is the sentence
+    0.7.0 removed for ``screening_unavailable``, and this is the other half of
+    it. ``tasks.screen_case`` catches this and parks the case with no verdict,
+    under ``ON_MEDIA_UNAVAILABLE``.
+
+    ``refs`` is the evidence: without the names of the refs that failed,
+    nobody can repair the seam the park is reporting.
+    """
+
+    def __init__(self, refs=(), message: str = ""):
+        self.refs = tuple(str(ref) for ref in refs)
+        super().__init__(
+            message
+            or f"{len(self.refs)} media ref(s) unresolved: {', '.join(self.refs)}"
+        )
+
+
 @dataclass
 class ScreeningResult:
     """One automatic verdict, before it becomes a :class:`Verdict` row."""
@@ -357,31 +386,25 @@ def run_llm(case, content, *, reports=()) -> ScreeningResult:
             # other photos are real, and a partial view is a view. Dropping
             # ALL of them is a different sentence — this screening did not
             # happen — and a screener that cannot see what it was asked about
-            # must abstain rather than answer. Abstaining routes it to the
-            # human queue, which is already this module's answer to "cannot
-            # screen" (ON_SCREENING_FAILURE="hold"). It is deliberately NOT a
-            # ScreeningUnavailable: unresolvable refs will not resolve on the
-            # next attempt either, so the retry ladder would spend three
-            # attempts to reach the same place.
-            from .registry import REASON_MEDIA_UNAVAILABLE
-
+            # must abstain rather than answer.
+            #
+            # Until 0.8.0 that abstention was WRITTEN DOWN as `policy_default /
+            # needs_review / media_unavailable` and the case joined the human
+            # queue. The retry reasoning was right and the outcome was wrong:
+            # not retrying is correct (an unknown ref stays unknown), but the
+            # thing to do instead is park the case, not mint a verdict no
+            # machine produced. `MediaUnresolvable` carries the refs and never
+            # touches the ladder; `tasks.screen_case` decides where it lands.
+            refs = tuple(str(ref) for ref in content.media)
             logger.warning(
                 "moderation: case %s declares %s media ref(s) and none could be "
-                "resolved for screening — abstaining rather than judging the "
+                "resolved for screening (%s) — parking rather than judging the "
                 "text alone",
                 case.id,
-                len(tuple(content.media)),
+                len(refs),
+                ", ".join(refs),
             )
-            return ScreeningResult(
-                decision=VerdictDecision.NEEDS_REVIEW,
-                source=VerdictSource.POLICY_DEFAULT,
-                reason_code=REASON_MEDIA_UNAVAILABLE,
-                rationale=(
-                    "The listing's photos could not be retrieved, so only its "
-                    "text could be checked automatically."
-                ),
-                media_flags=tuple(str(ref) for ref in content.media),
-            )
+            raise MediaUnresolvable(refs)
 
     # Level 1: the transport itself.
     try:
@@ -452,6 +475,7 @@ def get_screener():
 
 
 __all__ = [
+    "MediaUnresolvable",
     "ScreeningResult",
     "ScreeningUnavailable",
     "default_screener",

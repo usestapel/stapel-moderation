@@ -190,6 +190,43 @@ def check_auto_resolve(app_configs, **kwargs):
     )]
 
 
+@checks.register(checks.Tags.compatibility)
+def check_media_unavailable_policy(app_configs, **kwargs):
+    """E010/W010: where a case nobody could screen the photos of is sent.
+
+    Neither branch writes a verdict — that part is not configurable, and it is
+    the whole ruling of 2026-09-06. What the host chooses is who SEES the
+    parked case, and the choice has a cost either way, so it is a confession
+    like W001 and W002 rather than a diagnostic.
+    """
+    from .conf import moderation_settings
+
+    value = str(moderation_settings.ON_MEDIA_UNAVAILABLE or "").lower()
+    if value not in ("dlq", "review"):
+        return [checks.Error(
+            f"STAPEL_MODERATION['ON_MEDIA_UNAVAILABLE'] = "
+            f"{moderation_settings.ON_MEDIA_UNAVAILABLE!r}; only 'dlq' and "
+            f"'review' exist.",
+            hint="'dlq' parks the case out of the moderator queue (the "
+                 "default); 'review' leaves it queued, marked as unscreenable.",
+            id="stapel_moderation.E010",
+        )]
+    if value == "dlq":
+        return []
+    return [checks.Warning(
+        "STAPEL_MODERATION['ON_MEDIA_UNAVAILABLE'] = 'review' — a case whose "
+        "photos could not be fetched stays in the MODERATOR queue, marked "
+        "unscreenable (dlq_at set, no verdict). A moderator can rarely load "
+        "those photos either, so the queue fills with rows nobody can work; "
+        "on a client stand that shape made the queue 94% cases about deleted "
+        "content.",
+        hint="Set it to 'dlq' (the default) to park these for an engineer, "
+             "or keep 'review' knowingly and render dlq_at as \"could not "
+             "screen\" so it never reads as an AI verdict.",
+        id="stapel_moderation.W010",
+    )]
+
+
 @checks.register(checks.Tags.security)
 def check_anonymous_reports(app_configs, **kwargs):
     """W003: anonymous intake is open without a captcha behind it."""

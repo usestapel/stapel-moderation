@@ -4,6 +4,117 @@ All notable changes to stapel-moderation are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Pre-1.0 semver: **minor = breaking**, patch = compatible.
 
+## [0.8.0] — 2026-09-09
+
+### A screening that saw no photo is not a verdict either
+
+0.7.0 established the rule: **a screening failure is not a verdict.** It
+applied it to `screening_unavailable` and the numbers on a client stand say
+it worked — that reason code stops dead on 2026-09-06. `media_unavailable`
+was never brought under the same rule and was still minting verdicts three
+days later, at 00:25 on 2026-09-09.
+
+Measured on that stand before this release: 694 `policy_default` verdicts, of
+which 201 read `needs_review / media_unavailable`; 52 cases in the human
+queue, 46 of them holding one of those; 49 of the 52 pointing at a listing
+that no longer existed. **88% of the moderator queue had never been judged by
+the AI at all, and 94% of it was about deleted content.**
+
+#### A case whose photos cannot be fetched is parked, not judged (BREAKING)
+
+`screening.run_llm` used to RETURN `needs_review / policy_default /
+media_unavailable` when a case declared media and not one ref resolved. The
+reasoning in that branch was right about retries — an unknown ref does not
+become known on attempt two, so this must never climb the ladder — and wrong
+about the outcome: not retrying is not the same as deciding. It minted a
+machine verdict saying "a person must look" from a path where no machine
+looked at anything, generated it into DSA Art. 17 statements of reasons, and
+dropped it into the queue next to real abstentions.
+
+It now raises `screening.MediaUnresolvable`, which is deliberately **not** a
+`ScreeningUnavailable` subclass: `tasks.screen_case` catches it, parks the
+case with no verdict at all, and the task completes rather than retrying. One
+attempt, one park.
+
+**The fork, and it is a switch.** A listing whose declared photos cannot be
+fetched may itself deserve a human look. `ON_MEDIA_UNAVAILABLE` names the two
+shapes and neither of them writes a verdict — that part is the ruling, not a
+setting:
+
+* `"dlq"` (default) — the case goes to `DLQ`, out of `HUMAN_QUEUE_STATES`, so
+  the moderator console never shows it. **Cost:** a listing whose photos
+  nobody can fetch is invisible to moderation until an engineer repairs the
+  seam and `rescreen_stuck_cases` brings it back. It is the branch that
+  honours the ruling of 2026-09-06, which is why it is the default.
+* `"review"` — the case stays `QUEUED`, carrying the same stamps (`dlq_at`
+  set, `last_error_class = "MediaUnavailable"`, no verdict), so a console
+  renders it as "could not screen", visually distinct from an AI verdict.
+  **Cost:** the queue refills with rows whose photos the moderator cannot
+  load either — the shape that made the stand's queue 94% noise. It prints
+  `moderation.W010`, because that is a trade a deployment should have to
+  write down.
+
+**The park names what broke.** `services.park_unscreened` is the one writer
+of the dead-letter stamps and of the `dead_lettered` audit row, and it takes
+arbitrary failure detail into that row's payload. The media park writes
+`media_refs` there and the ref list into `Case.last_error`. `dead_letter_case`
+is now a thin wrapper on it and is unchanged for its callers.
+
+`MediaUnavailable` joins the closed `ERROR_CLASSES` vocabulary, so
+`moderation_case_dlq_total{error_class="MediaUnavailable"}` and the DLQ tab's
+group-by separate a CDN seam from a provider outage.
+
+#### A case must not outlive its subject
+
+`sweep_stale_cases` reported `0 lease(s) released, 0 stalled screening(s)
+queued, 0 stale case(s) auto-resolved` while 49 queued cases pointed at
+deleted listings. It was telling the truth: it does not ask that question, and
+neither did anything else that could still reach those cases.
+
+Nothing emits a fact this module subscribes to when a target is deleted. The
+only path that ever notices is a re-screen, and `rescreen_stuck_cases` filters
+`escalated_at__isnull=True` — so once a case reaches `RESCREEN_MAX_ATTEMPTS`
+it is outside the only job that could discover its subject died, permanently.
+On the stand, 51 of the 52 queued cases were escalated at
+`rescreen_attempts=3`.
+
+`tasks.sweep_orphaned_cases` is the mechanism, a beat job of its own
+(`ORPHAN_SCHEDULE`, every 20 minutes). For each `QUEUED`/`DLQ` case older than
+`ORPHAN_CHECK_AFTER` (3600s; 0 disables) it asks the target module whether the
+subject exists, and closes the ones that do not as `dismissed / subject_gone`.
+
+It is a separate job rather than a branch in `rescreen_stuck_cases` because of
+that cap: the cap bounds **billing**, since a re-screen pays for a completion.
+This is a content call, it can only ever CLOSE a case, and it renders no
+judgement about content — so escalated cases are deliberately in scope, and
+"the machine gave up" stops meaning "exempt from the truth". It is a separate
+job rather than a branch in `sweep_stale_cases` because that job's promise is
+that it never resolves anything, and that promise is worth keeping intact.
+
+What it will not do: touch `CLAIMED` (a moderator holding the lease outranks
+the clock); treat `ContentUnavailable` as absence (a sibling that is DOWN says
+nothing about whether the row exists, and collapsing the two turns a redeploy
+into a mass dismissal); or probe an evidence-based target type, whose subject
+is an attestation stored here.
+
+#### One name for one fact
+
+`screen_case`'s `TargetNotFound` branch wrote the bare string
+`target_not_found` — declared in no registry, translated by nothing, and a
+second name for what every other path calls `subject_gone`. It now closes
+through `close_subject_gone` like the rest.
+
+#### Upgrading
+
+No migration and no rewrite of history. Verdicts already carrying
+`policy_default / needs_review / media_unavailable` are left exactly where
+they are — an append-only audit trail that feeds statements of reasons is not
+something a release gets to edit, the same line 0.7.0 held. To retire them,
+run `manage.py moderation_rescreen --state queued --dry-run` first: each case
+goes back through the ladder and reaches its new state the way every other
+case reaches it. `sweep_orphaned_cases` will close the ones whose subject is
+gone on its own schedule once this version is deployed.
+
 ## [0.7.2] — 2026-09-06
 
 ### A rescreen nobody was watching, and a card that read the audit log

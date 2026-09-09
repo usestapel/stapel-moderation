@@ -1,8 +1,8 @@
-# stapel-moderation 0.7.2
+# stapel-moderation 0.8.0
 
 The fleet's single producer of moderation verdicts: one target-generic queue over listings, reviews, chat messages and profiles, keyed by an opaque (target_type, target_key) and driven by a host-registered policy per type. One Case per target however many people complain, one status vocabulary in the whole module, an append-only Verdict and an append-only CaseEvent audit trail whose mutations are FORBIDDEN by mandate declaration. Screening is a comm-Task (deterministic rules, then schema-constrained llm.complete) with a closed hold-for-a-human default when the automation cannot answer. Resolution ACTS on the target by emitting moderation.completed, which stapel-listings and stapel-reviews already consume. Sanctions carry a kind, a scope, a reason, a clock, an appeal and an audit trail, and they bite through core's cross-service user blacklist — the hook every request path already checked and nobody had ever called. Plus DSA artefacts generated from the registries: a public policy disclosure, a statement of reasons on every takedown, an acknowledgement to every complainant, and an internal appeal heard by a different moderator.
 
-Contract: axes 11 · surface 65 · extension points 6 · operations 18 · error codes 70.
+Contract: axes 11 · surface 67 · extension points 6 · operations 18 · error codes 70.
 Generated from docs/capabilities.json by `stapel-llms-txt` — do not edit; drift-gated by `make contract-check`.
 
 ## Configuration axes — what a product switches on
@@ -137,6 +137,9 @@ This is the answer to "does Stapel already have something for X?". `instead of` 
 - open_case — stapel_moderation.services.open_case
   instead of: Case.objects.create, Case.objects.get_or_create
   Find or open the live case for one target — the single entry point of all three intake paths, and where idempotency-by-state lives.
+- park_unscreened — stapel_moderation.services.park_unscreened
+  instead of: recording a policy_default needs_review verdict for a screening that never happened
+  Record that a case could NOT be screened — the dlq stamps, the audit row and the failure detail — and write no verdict for it. visible_to_moderators decides whether the park sits in the dlq state or stays queued and marked.
 - purge_expired_cases — stapel_moderation.tasks.purge_expired_cases
   Destroy closed cases and lapsed sanctions past their two different retention horizons, never a case a live sanction still depends on.
 - queue_case — stapel_moderation.services.queue_case
@@ -182,6 +185,9 @@ This is the answer to "does Stapel already have something for X?". `instead of` 
 - submit_report — stapel_moderation.services.submit_report
   instead of: Report.objects.create
   Accept one complaint: validate against the reason registry and the type policy, join or open the case, record the report, count it.
+- sweep_orphaned_cases — stapel_moderation.tasks.sweep_orphaned_cases
+  instead of: leaving a case in the moderator queue after its listing was deleted
+  Ask each undecided case's target module whether the subject still exists, and close the ones that no longer do as dismissed / subject_gone. Escalated cases are in scope on purpose: the re-screen cap bounds billing, not truth.
 - sweep_stale_cases — stapel_moderation.tasks.sweep_stale_cases
   Return expired claims and stalled screenings to the queue. Never renders a verdict — that is the whole difference from the predecessor system's stale sweeper.
 - target_is_addressable — stapel_moderation.services.target_is_addressable

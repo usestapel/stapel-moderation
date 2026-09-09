@@ -718,15 +718,19 @@ def test_declared_media_that_all_fails_to_resolve_does_not_approve(
     is the row-level version, measured on the live stand AFTER 0.5.0 and
     ``MEDIA_BASE_URL`` were both in place: the listing carries media refs,
     ``cdn.describe`` answers ``LookupError`` for every one of them, and
-    ``_media_images`` returns ``[]``. ``run_llm`` then omits the ``images``
-    key, the model answers about the text alone, and the verdict is recorded
-    as a full screening — an approval whose evidence never included the photo
-    it was supposed to be about.
+    ``_media_images`` returns ``[]``.
 
     Skipping ONE ref of several is still the right posture (the text and the
     other photos are real). Skipping ALL of them is a different sentence: this
-    screening did not happen. The machine abstains, and the human queue —
-    which is already this module's answer to "cannot screen" — gets it.
+    screening did not happen.
+
+    **What 0.8.0 changed.** 0.5.0 wrote that sentence down as
+    ``policy_default / needs_review / media_unavailable`` and queued the case —
+    a machine verdict saying "a person must look", from a path where no
+    machine looked. That is the exact shape 0.7.0 abolished for
+    ``screening_unavailable``, and on a client stand it was still running:
+    201 such verdicts, 46 of them the whole content of the moderator queue.
+    No verdict is written any more.
     """
     settings.STAPEL_MODERATION = {"MEDIA_BASE_URL": "https://cdn.example.test"}
     content_double["media"] = ["product/never-uploaded"]  # not in cdn_double
@@ -738,9 +742,105 @@ def test_declared_media_that_all_fails_to_resolve_does_not_approve(
         services.start_screening(case, emit_event=emit_event)
 
     case.refresh_from_db()
-    assert case.last_verdict.decision == "needs_review"
-    assert case.last_verdict.reason_code == "media_unavailable"
-    assert case.state == "queued", "the human queue is the fallback, as ever"
+    assert case.last_verdict is None, "no machine looked, so no machine decided"
+    assert not Verdict.objects.filter(case=case).exists()
+    assert case.state == CaseState.DLQ
+    assert case.dlq_at is not None
+    assert case.last_error_class == "MediaUnavailable"
+
+
+def test_the_park_names_the_refs_that_could_not_be_resolved(
+    content_double, cdn_double, llm_double, settings
+):
+    """A park that cannot name what broke reports a seam nobody can find.
+
+    The verdict is gone, so the refs have to live somewhere a person reads:
+    the audit row's payload and the case's ``last_error``.
+    """
+    from stapel_core.comm import mutate_and_emit
+
+    from stapel_moderation.models import CaseEvent, CaseEventKind
+
+    settings.STAPEL_MODERATION = {"MEDIA_BASE_URL": "https://cdn.example.test"}
+    content_double["media"] = ["product/gone-a", "product/gone-b"]
+
+    case = _open_case()
+    with mutate_and_emit() as emit_event:
+        services.start_screening(case, emit_event=emit_event)
+
+    case.refresh_from_db()
+    row = CaseEvent.objects.filter(
+        case=case, kind=CaseEventKind.DEAD_LETTERED
+    ).latest("created_at")
+    assert row.payload["media_refs"] == ["product/gone-a", "product/gone-b"]
+    assert "product/gone-a" in case.last_error
+
+
+def test_unresolvable_media_never_climbs_the_retry_ladder(
+    content_double, cdn_double, llm_double, settings
+):
+    """Parking is not retrying, and this is the line between them.
+
+    A ref ``cdn.describe`` does not know will not become known on attempt two,
+    so the case must not burn ``SCREEN_MAX_ATTEMPTS`` reaching the same place.
+    One attempt, one park.
+    """
+    from stapel_core.comm import mutate_and_emit
+
+    settings.STAPEL_MODERATION = {"MEDIA_BASE_URL": "https://cdn.example.test"}
+    content_double["media"] = ["product/never-uploaded"]
+
+    case = _open_case()
+    with mutate_and_emit() as emit_event:
+        services.start_screening(case, emit_event=emit_event)
+
+    case.refresh_from_db()
+    assert case.screen_attempts == 1
+    record = TaskRecord.objects.get(id=case.screen_task_id)
+    assert record.state == "done", "a park is a completed task, not a failure"
+
+
+def test_on_media_unavailable_review_keeps_the_case_visible_but_unjudged(
+    content_double, cdn_double, llm_double, settings
+):
+    """The owner's fork, built as a switch.
+
+    ``"review"`` is the branch for "a listing whose photos nobody can fetch
+    may itself deserve a human look". It changes WHO SEES the park and nothing
+    else: still no verdict, still stamped, so a console renders it as "could
+    not screen" rather than as an AI abstention.
+    """
+    from stapel_core.comm import mutate_and_emit
+
+    settings.STAPEL_MODERATION = {
+        "MEDIA_BASE_URL": "https://cdn.example.test",
+        "ON_MEDIA_UNAVAILABLE": "review",
+    }
+    content_double["media"] = ["product/never-uploaded"]
+
+    case = _open_case()
+    with mutate_and_emit() as emit_event:
+        services.start_screening(case, emit_event=emit_event)
+
+    case.refresh_from_db()
+    assert case.state == CaseState.QUEUED, "the moderator sees it"
+    assert case.last_verdict is None, "and it is still not a verdict"
+    assert case.dlq_at is not None, "marked, so the console can tell them apart"
+    assert case.last_error_class == "MediaUnavailable"
+
+
+def test_the_review_fork_is_a_declared_confession(settings):
+    """W010: a queue that refills with unscreenable rows is a choice, not luck."""
+    from django.core.checks import run_checks
+
+    settings.STAPEL_MODERATION = {"ON_MEDIA_UNAVAILABLE": "review"}
+    assert "stapel_moderation.W010" in {getattr(m, "id", "") for m in run_checks()}
+
+    settings.STAPEL_MODERATION = {"ON_MEDIA_UNAVAILABLE": "dlq"}
+    assert "stapel_moderation.W010" not in {getattr(m, "id", "") for m in run_checks()}
+
+    settings.STAPEL_MODERATION = {"ON_MEDIA_UNAVAILABLE": "hold"}
+    assert "stapel_moderation.E010" in {getattr(m, "id", "") for m in run_checks()}
 
 
 def test_one_resolvable_ref_among_several_still_screens(

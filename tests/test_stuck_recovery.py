@@ -24,6 +24,9 @@ first submission. What the sweep owns is *when*, with a backoff so a stuck
 case is not a billing loop, and a cap so a permanently failing case is
 surfaced rather than retried forever.
 """
+import uuid
+from datetime import timedelta
+
 import pytest
 from django.utils import timezone
 
@@ -466,6 +469,194 @@ def test_a_real_target_that_vanished_is_closed_by_the_ladder(content_double):
 
     result = screen_case({"case_id": str(case.id)})
 
-    assert result["reason"] == "target_not_found"
+    # ONE name for one fact (0.8.0). This branch used to write the bare string
+    # `target_not_found`, which no registry declares and no translation covers,
+    # while every other "the subject is gone" path wrote `subject_gone`.
+    assert result["reason"] == "subject_gone"
     case.refresh_from_db()
     assert case.state == CaseState.RESOLVED
+    assert case.last_verdict.reason_code == "subject_gone"
+
+    from stapel_moderation.registry import get_reasons
+
+    assert "subject_gone" in get_reasons(), "a verdict reason nobody can name"
+
+
+# ── A case must not outlive its subject ──────────────────────────────
+
+
+def _queued_case(target_key, **kwargs):
+    from django.utils import timezone
+
+    case = Case.objects.create(
+        target_type="listing",
+        target_key=target_key,
+        state=CaseState.QUEUED,
+        **kwargs,
+    )
+    # Older than ORPHAN_CHECK_AFTER, which is what makes it a candidate.
+    Case.objects.filter(pk=case.pk).update(
+        updated_at=timezone.now() - timedelta(days=2)
+    )
+    case.refresh_from_db()
+    return case
+
+
+def test_a_queued_case_whose_listing_was_deleted_is_closed(content_double):
+    """The defect this job exists for, in one row.
+
+    Nothing emits a fact this module subscribes to when a listing is deleted,
+    and the only path that would ever notice — a re-screen — stops at
+    ``RESCREEN_MAX_ATTEMPTS`` forever. So the module asks.
+    """
+    from stapel_moderation.tasks import sweep_orphaned_cases
+
+    case = _queued_case("9999")  # the double answers LookupError for it
+
+    result = sweep_orphaned_cases()
+
+    assert result["closed"] == 1
+    case.refresh_from_db()
+    assert case.state == CaseState.RESOLVED
+    assert case.last_verdict.reason_code == "subject_gone"
+
+
+def test_an_escalated_case_is_not_exempt_from_the_truth(content_double):
+    """The line that made the stand's queue 94% noise.
+
+    ``rescreen_stuck_cases`` filters ``escalated_at__isnull=True``, so a case
+    that reached the re-screen cap is permanently outside the only job that
+    could discover its subject died — 51 of 52 queued cases on a client stand
+    were exactly this. The cap bounds BILLING; this probe costs a content call
+    and can only close a case, so it applies the cap to nothing.
+    """
+    from django.utils import timezone
+
+    from stapel_moderation.tasks import rescreen_stuck_cases, sweep_orphaned_cases
+
+    case = _queued_case("9999", rescreen_attempts=3, escalated_at=timezone.now())
+
+    assert rescreen_stuck_cases() == 0, "the re-screen sweep cannot reach it"
+
+    assert sweep_orphaned_cases()["closed"] == 1
+    case.refresh_from_db()
+    assert case.state == CaseState.RESOLVED
+
+
+def test_a_live_subject_is_left_alone(content_double):
+    """The queue a moderator owes is not swept by a clock."""
+    from stapel_moderation.tasks import sweep_orphaned_cases
+
+    case = _queued_case("42")  # the double serves this one
+
+    result = sweep_orphaned_cases()
+
+    assert result == {"probed": 1, "closed": 0, "unavailable": 0}
+    case.refresh_from_db()
+    assert case.state == CaseState.QUEUED
+
+
+def test_an_owner_that_is_down_is_not_an_absent_subject(content_double):
+    """``ContentUnavailable`` is a restart, not a deletion.
+
+    Collapsing the two would turn one sibling's redeploy into a mass dismissal
+    of everything a moderator still owes.
+    """
+    from stapel_core.comm import function
+
+    from stapel_moderation.registry import register_target_type
+    from stapel_moderation.tasks import sweep_orphaned_cases
+
+    @function("listings.outage_content")
+    def _down(payload):
+        raise RuntimeError("connection refused")
+
+    register_target_type(
+        "listing",
+        {
+            "id_field": "listing_id",
+            "content_function": "listings.outage_content",
+            "verdict_event": "moderation.completed",
+        },
+    )
+    case = _queued_case("42")
+
+    result = sweep_orphaned_cases()
+
+    assert result["unavailable"] == 1 and result["closed"] == 0
+    case.refresh_from_db()
+    assert case.state == CaseState.QUEUED
+
+
+def test_a_dead_letter_whose_subject_is_gone_is_closed_too(content_double):
+    """A park waits for a repair. There is nothing left to repair here."""
+    from django.utils import timezone
+
+    from stapel_moderation.tasks import sweep_orphaned_cases
+
+    case = Case.objects.create(
+        target_type="listing",
+        target_key="9999",
+        state=CaseState.DLQ,
+        dlq_at=timezone.now(),
+        last_error_class="MediaUnavailable",
+    )
+    Case.objects.filter(pk=case.pk).update(
+        updated_at=timezone.now() - timedelta(days=2)
+    )
+    case.refresh_from_db()
+
+    assert sweep_orphaned_cases()["closed"] == 1
+    case.refresh_from_db()
+    assert case.state == CaseState.RESOLVED
+
+
+def test_a_claimed_case_outranks_the_clock(content_double):
+    """A moderator holding the lease is working it right now."""
+    from django.utils import timezone
+
+    from stapel_moderation.tasks import sweep_orphaned_cases
+
+    case = Case.objects.create(
+        target_type="listing",
+        target_key="9999",
+        state=CaseState.CLAIMED,
+        claimed_by=uuid.uuid4(),
+        claimed_until=timezone.now() + timedelta(minutes=10),
+    )
+    Case.objects.filter(pk=case.pk).update(
+        updated_at=timezone.now() - timedelta(days=2)
+    )
+
+    assert sweep_orphaned_cases()["probed"] == 0
+    case.refresh_from_db()
+    assert case.state == CaseState.CLAIMED
+
+
+def test_the_probe_is_off_when_the_window_is_zero(content_double, settings):
+    settings.STAPEL_MODERATION = {"ORPHAN_CHECK_AFTER": 0}
+    from stapel_moderation.tasks import sweep_orphaned_cases
+
+    _queued_case("9999")
+    assert sweep_orphaned_cases() == {"probed": 0, "closed": 0, "unavailable": 0}
+
+
+def test_a_fresh_case_is_not_probed(content_double):
+    """The window keeps the job off the path of a case still being screened."""
+    from stapel_moderation.tasks import sweep_orphaned_cases
+
+    Case.objects.create(
+        target_type="listing", target_key="9999", state=CaseState.QUEUED
+    )
+    assert sweep_orphaned_cases()["probed"] == 0
+
+
+def test_the_orphan_job_is_in_the_beat_schedule():
+    """A job nobody schedules is a job nobody runs — the W004 lesson.
+
+    ``BEAT_TASK_NAMES`` is what ``check_beat_schedule`` walks, so a job absent
+    from it is a job W004 will never notice is unscheduled.
+    """
+    from stapel_moderation.beat import BEAT_TASK_NAMES, ORPHAN_TASK_NAME
+
+    assert ORPHAN_TASK_NAME in BEAT_TASK_NAMES

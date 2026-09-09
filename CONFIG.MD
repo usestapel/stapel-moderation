@@ -55,7 +55,19 @@ claim that every key is settable from a shell:
 | LLM_CONFIDENCE_FLOOR | env | Below it the decision is forced to `needs_review` whatever the model said. | no | `0.7` |
 | ON_SCREENING_FAILURE | env | `hold` \| `approve` \| `reject` when the screener could not answer. **Closed default `hold`**: the case is DEAD-LETTERED (`state=dlq`) with no verdict — "we could not check" is not a decision about content, and since 0.7.0 it is not written down as one. Anything else prints `moderation.W001`. | no | `hold` |
 | ON_SCREENING_UNAVAILABLE | env | Same vocabulary, for "no screener configured at all". | no | `hold` |
+| ON_MEDIA_UNAVAILABLE | env | `dlq` \| `review` when a case declares photos and NOT ONE ref resolves. Neither branch writes a verdict — no machine looked. **Closed default `dlq`**: the case is parked out of the moderator queue, stamped with the refs that failed. `review` leaves it QUEUED with the same stamps so a console can show it as "could not screen", and prints `moderation.W010`. | no | `dlq` |
 | AUTO_RESOLVE_STALE_QUEUE | env | Seconds after which an unreviewed QUEUED case auto-approves. `None` = never, and never is the point. A number prints `moderation.W002`. | no | `None` |
+
+### Recovering a case nothing can move (source: env)
+
+| Key | Source | Purpose | Required | Default |
+|-----|--------|---------|----------|---------|
+| RESCREEN_STUCK_AFTER | env | Seconds a QUEUED/DLQ case may sit before `rescreen_stuck_cases` hands it back to the ladder. Each attempt waits twice as long as the last. | no | `3600` |
+| RESCREEN_MAX_ATTEMPTS | env | Automatic re-screens one case gets. Past it the case is ESCALATED — surfaced, never auto-decided. The cap bounds BILLING. | no | `3` |
+| RESCREEN_SCHEDULE | env | Beat cadence of `rescreen_stuck_cases`. | no | `{"minute": "*/15"}` |
+| ORPHAN_CHECK_AFTER | env | Seconds an undecided case may sit before `sweep_orphaned_cases` asks its target module whether the subject still exists; gone ones close as `dismissed / subject_gone`. Escalated cases are in scope on purpose. `0` disables. | no | `3600` |
+| ORPHAN_CHECK_BATCH | env | Cases probed per run — a bound on the sibling module, not on us. | no | `200` |
+| ORPHAN_SCHEDULE | env | Beat cadence of `sweep_orphaned_cases`. | no | `{"minute": "*/20"}` |
 
 ### Queue (source: env)
 

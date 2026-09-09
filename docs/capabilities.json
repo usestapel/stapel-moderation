@@ -1,6 +1,6 @@
 {
   "module": "stapel-moderation",
-  "version": "0.7.2",
+  "version": "0.8.0",
   "provides": "The fleet's single producer of moderation verdicts: one target-generic queue over listings, reviews, chat messages and profiles, keyed by an opaque (target_type, target_key) and driven by a host-registered policy per type. One Case per target however many people complain, one status vocabulary in the whole module, an append-only Verdict and an append-only CaseEvent audit trail whose mutations are FORBIDDEN by mandate declaration. Screening is a comm-Task (deterministic rules, then schema-constrained llm.complete) with a closed hold-for-a-human default when the automation cannot answer. Resolution ACTS on the target by emitting moderation.completed, which stapel-listings and stapel-reviews already consume. Sanctions carry a kind, a scope, a reason, a clock, an appeal and an audit trail, and they bite through core's cross-service user blacklist — the hook every request path already checked and nobody had ever called. Plus DSA artefacts generated from the registries: a public policy disclosure, a statement of reasons on every takedown, an acknowledgement to every complainant, and an internal appeal heard by a different moderator.",
   "axes": [
     {
@@ -481,6 +481,15 @@
       ]
     },
     {
+      "name": "park_unscreened",
+      "kind": "factory",
+      "path": "stapel_moderation.services.park_unscreened",
+      "intent": "Record that a case could NOT be screened — the dlq stamps, the audit row and the failure detail — and write no verdict for it. visible_to_moderators decides whether the park sits in the dlq state or stays queued and marked.",
+      "instead_of": [
+        "recording a policy_default needs_review verdict for a screening that never happened"
+      ]
+    },
+    {
       "name": "policy_disclosure",
       "kind": "predicate",
       "path": "stapel_moderation.services.policy_disclosure",
@@ -644,6 +653,15 @@
       "kind": "factory",
       "path": "stapel_moderation.tasks.screen_case",
       "intent": "The comm-Task handler: read live content, run the screener, record a verdict. Raises rather than returning on failure, which is what makes the retry ladder exist at all."
+    },
+    {
+      "name": "sweep_orphaned_cases",
+      "kind": "factory",
+      "path": "stapel_moderation.tasks.sweep_orphaned_cases",
+      "intent": "Ask each undecided case's target module whether the subject still exists, and close the ones that no longer do as dismissed / subject_gone. Escalated cases are in scope on purpose: the re-screen cap bounds billing, not truth.",
+      "instead_of": [
+        "leaving a case in the moderator queue after its listing was deleted"
+      ]
     },
     {
       "name": "sweep_stale_cases",
