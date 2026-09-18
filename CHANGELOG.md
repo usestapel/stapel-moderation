@@ -4,6 +4,27 @@ All notable changes to stapel-moderation are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Pre-1.0 semver: **minor = breaking**, patch = compatible.
 
+## [0.8.1] — 2026-09-18
+
+### Fixed — the verdict declared a confidence it answers as null
+
+`VerdictPresenterDTO.confidence` was declared a required, non-nullable number
+and is `null` on every human verdict — which is every verdict
+`POST /cases/{case_id}/verdict` produces, and every verdict row on the card of
+a case a moderator has worked.
+
+The claim came from stapel-core: `presenters._infer_type` mapped
+`models.FloatField` to `float` without reading `null=True`. Core 0.74.0 reads
+it, `docs/` is re-emitted against 0.84.0 and now declares `confidence`
+nullable, and both `KNOWN_MISMATCHES` entries in `tests/test_contract_wire.py`
+are deleted — the dict is empty and all 18 driven operations answer the body
+they declare in both states.
+
+### Changed
+- **`stapel-core>=0.60.0` → `>=0.84.0`.** The emitted contract is the floor: on
+  an older core this wheel ships a document that calls a nullable column
+  non-nullable.
+
 ## [0.8.0] — 2026-09-09
 
 ### A screening that saw no photo is not a verdict either

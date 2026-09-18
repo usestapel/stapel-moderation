@@ -62,8 +62,10 @@ defect reaching two of them.
   ``models.FloatField`` to ``float`` without reading ``null=True``, so the
   generated DTO says ``float`` where the model says ``float | None``. The
   presenter already spells this correctly for ``actor_id`` two lines below,
-  with ``Optional[str]`` in ``custom_fields``. Recorded in
-  ``KNOWN_MISMATCHES``, left exactly as it is: this is a gate, not a fix.
+  with ``Optional[str]`` in ``custom_fields``. stapel-core 0.74.0 teaches
+  ``_infer_type`` to read ``null=True``, so the DTO now says ``float | None``,
+  the document is emitted against that core, and the entry is deleted:
+  ``KNOWN_MISMATCHES`` is empty.
 
 Everything else holds, in both states, in both directions: no operation here
 answers a key the contract fails to mention either (the check that caught
@@ -839,44 +841,14 @@ def _appeal_resolve(call):
 #: defect AND its owner, and ``strict=True`` turns a fixed one into a failure
 #: until the entry is deleted — so a finding can be neither forgotten nor
 #: quietly kept. Recorded, not fixed: this is a gate.
-KNOWN_MISMATCHES: dict = {
-    ("POST", V1 + "/cases/{case_id}/verdict"): (
-        "declares VerdictPresenterDTO.confidence as a REQUIRED, non-nullable "
-        "`number` and answers null for every HUMAN verdict — which is every "
-        "verdict this endpoint can produce. Owner: stapel-moderation, "
-        "presenters.py:222, where VerdictPresenter lists `confidence` among "
-        "the as-is `fields`; stapel_core.django.api.presenters._infer_type "
-        "maps models.FloatField -> float and does not read `null=True`, so "
-        "the generated DTO field is `float`, not `Optional[float]`. The "
-        "column is null by design (models.py:425, '#: LLM only.') and "
-        "CaseVerdictView.post (views.py:515) calls services.resolve_case "
-        "without a confidence, so services.py:901 leaves it None. The fix is "
-        "one line in THIS module: move `confidence` into custom_fields as "
-        "Optional[float], exactly as `actor_id` already is two lines below. "
-        "A generated client reads verdict.confidence as a number and gets "
-        "null on every decision a moderator makes."
-    ),
-    ("GET", V1 + "/cases/{case_id}"): (
-        "same defect, reached through the card: CaseDetailPresenterDTO."
-        "verdicts[] is VerdictPresenterDTO, so every worked case — one a "
-        "moderator has actually decided — carries a verdict row whose "
-        "REQUIRED `confidence` is null. Owner: stapel-moderation "
-        "presenters.py:222 (see the verdict entry above). This is the "
-        "operation the console reads, so the defect reaches a screen rather "
-        "than only a write response."
-    ),
-}
+KNOWN_MISMATCHES: dict = {}
 
 #: Which pass each recorded mismatch applies to.
 #:
 #: A defect that shows in only ONE state must not xfail the other: with
-#: ``strict=True`` an honest answer marked xfail is itself a failure, and
-#: marking both passes would be a claim this gate has not made. ``GET
-#: /cases/{case_id}`` is honest on an untouched case (no verdict rows at all)
-#: and lies on a worked one. Anything not named here applies to both.
-MISMATCH_STATES: dict = {
-    ("GET", V1 + "/cases/{case_id}"): frozenset({"populated"}),
-}
+#: ``strict=True`` an honest answer marked xfail is itself a failure. Anything
+#: not named here applies to both passes.
+MISMATCH_STATES: dict = {}
 
 _ALL_STATES = frozenset({"populated", "empty"})
 

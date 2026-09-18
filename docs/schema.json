@@ -1790,6 +1790,7 @@
           "confidence": {
             "type": "number",
             "format": "double",
+            "nullable": true,
             "description": "confidence"
           },
           "model": {
