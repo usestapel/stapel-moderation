@@ -537,13 +537,12 @@ def test_a_watermarked_variant_is_read_through_its_clean_copy(
     settings.STAPEL_MODERATION = {"MEDIA_BASE_URL": "https://cdn.example.test"}
     variant = cdn_double["snapshots"]["product/802d669"]["variants"][1]
     variant["watermarked"] = True
-    variant["clean_url"] = "/media/cdn/product/802d669/clean/1080w.webp"
+    variant["clean_url"] = "/cdn/api/v1/media/signed/tok/"
 
     images = _media_images(_media_content())
 
-    assert images == [
-        {"url": "https://cdn.example.test/media/cdn/product/802d669/clean/1080w.webp"}
-    ]
+    assert images == [{"url": "https://cdn.example.test/cdn/api/v1/media/signed/tok/"}]
+    assert cdn_double["calls"][-1] == {"ref": "product/802d669", "clean": True}
 
 
 def test_a_relative_variant_url_without_a_base_is_skipped(

@@ -4,6 +4,15 @@ All notable changes to stapel-moderation are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Pre-1.0 semver: **minor = breaking**, patch = compatible.
 
+## [0.8.3] — 2026-09-25
+
+### Changed — the clean copy comes from a signed link
+
+stapel-cdn 0.27.0 no longer publishes `clean_url` in the public snapshot; a
+service asks for it with `cdn.describe {"ref": …, "clean": true}` and gets a
+short-lived signed link. The screener now sends that flag, so a watermarked
+photo is still screened unmarked. An older CDN ignores the flag.
+
 ## [0.8.2] — 2026-09-24
 
 ### Changed — a watermarked photo is screened through its clean copy

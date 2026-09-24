@@ -280,7 +280,9 @@ def _media_images(content) -> list:
     images = []
     for ref in refs:
         try:
-            described = call("cdn.describe", {"ref": str(ref)}) or {}
+            # "clean": signed links to the unwatermarked copies (stapel-cdn
+            # 0.27+); an older CDN ignores the flag.
+            described = call("cdn.describe", {"ref": str(ref), "clean": True}) or {}
         except (CommError, LookupError, KeyError):
             # A media reference we cannot resolve is not a reason to abandon
             # the screening of the text next to it.
@@ -300,8 +302,8 @@ def _media_images(content) -> list:
         if not best or not best.get("url"):
             continue
 
-        # A watermarked rendition carries its clean copy: the model judges
-        # the photo, not the brand mark drawn on it.
+        # A watermarked rendition carries its clean copy (a short-lived signed
+        # link): the model judges the photo, not the brand mark drawn on it.
         url = _absolute_url(str(best.get("clean_url") or best["url"]))
         if not url:
             logger.warning(
