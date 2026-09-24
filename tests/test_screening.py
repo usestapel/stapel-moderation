@@ -528,6 +528,24 @@ def test_a_relative_variant_url_is_absolutized_against_the_base(
     ]
 
 
+def test_a_watermarked_variant_is_read_through_its_clean_copy(
+    content_double, cdn_double, settings
+):
+    """The CDN brands public renditions; the screener reads the clean one."""
+    from stapel_moderation.screening import _media_images
+
+    settings.STAPEL_MODERATION = {"MEDIA_BASE_URL": "https://cdn.example.test"}
+    variant = cdn_double["snapshots"]["product/802d669"]["variants"][1]
+    variant["watermarked"] = True
+    variant["clean_url"] = "/media/cdn/product/802d669/clean/1080w.webp"
+
+    images = _media_images(_media_content())
+
+    assert images == [
+        {"url": "https://cdn.example.test/media/cdn/product/802d669/clean/1080w.webp"}
+    ]
+
+
 def test_a_relative_variant_url_without_a_base_is_skipped(
     content_double, cdn_double, caplog
 ):

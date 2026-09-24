@@ -4,6 +4,17 @@ All notable changes to stapel-moderation are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Pre-1.0 semver: **minor = breaking**, patch = compatible.
 
+## [0.8.2] — 2026-09-24
+
+### Changed — a watermarked photo is screened through its clean copy
+
+When a `cdn.describe` variant carries `clean_url` (stapel-cdn 0.26.0 writes
+one beside every watermarked rendition), the screener sends that address
+instead of the public, branded one. The verdict is about the photo; a brand
+mark drawn over it is noise to a vision model, and text in a corner is the
+kind of thing a policy prompt about contact details is told to look for.
+Variants without the field are read exactly as before.
+
 ## [0.8.1] — 2026-09-18
 
 ### Fixed — the verdict declared a confidence it answers as null

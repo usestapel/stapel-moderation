@@ -300,7 +300,9 @@ def _media_images(content) -> list:
         if not best or not best.get("url"):
             continue
 
-        url = _absolute_url(str(best["url"]))
+        # A watermarked rendition carries its clean copy: the model judges
+        # the photo, not the brand mark drawn on it.
+        url = _absolute_url(str(best.get("clean_url") or best["url"]))
         if not url:
             logger.warning(
                 "moderation: media ref %s resolves to the relative URL %s and "
