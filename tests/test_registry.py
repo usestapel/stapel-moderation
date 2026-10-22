@@ -234,7 +234,11 @@ def test_w003_anonymous_intake_without_a_captcha(db, settings):
     ids = {m.id for m in check_anonymous_reports(None)}
     assert "stapel_moderation.W003" in ids
 
+    # A secret with no backend is captcha OFF (core builds the noop verifier).
     settings.STAPEL_CAPTCHA = {"SECRET": "x"}
+    assert "stapel_moderation.W003" in {m.id for m in check_anonymous_reports(None)}
+
+    settings.STAPEL_CAPTCHA = {"BACKEND": "turnstile", "SECRET": "x"}
     assert check_anonymous_reports(None) == []
 
 
@@ -252,6 +256,25 @@ def test_w004_a_beat_schedule_that_never_rearms_a_ban(db, settings):
     messages = check_beat_schedule(None)
     assert {m.id for m in messages} == {"stapel_moderation.W004"}
     assert any("stops being enforced" in m.msg for m in messages)
+
+
+def test_w004_fires_when_there_is_no_beat_schedule_at_all(db, settings):
+    """A generated app ships no CELERY_BEAT_SCHEDULE: that is not "fine",
+    it is every job of this module silently not running — rearm included."""
+    from stapel_moderation.beat import BEAT_TASK_NAMES, REARM_TASK_NAME
+    from stapel_moderation.checks import check_beat_schedule
+
+    for absent in ({}, None):
+        settings.CELERY_BEAT_SCHEDULE = absent
+        messages = check_beat_schedule(None)
+        assert {m.id for m in messages} == {"stapel_moderation.W004"}
+        assert "is not set" in messages[0].msg
+        assert all(name in messages[0].msg for name in BEAT_TASK_NAMES)
+        assert REARM_TASK_NAME in messages[0].msg
+        assert "SILENCED_SYSTEM_CHECKS" in messages[0].hint
+        assert any("stops being enforced" in m.msg for m in messages)
+    del settings.CELERY_BEAT_SCHEDULE
+    assert {m.id for m in check_beat_schedule(None)} == {"stapel_moderation.W004"}
 
 
 def test_the_whole_beat_schedule_silences_w004(db, settings):

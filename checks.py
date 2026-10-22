@@ -230,18 +230,23 @@ def check_media_unavailable_policy(app_configs, **kwargs):
 @checks.register(checks.Tags.security)
 def check_anonymous_reports(app_configs, **kwargs):
     """W003: anonymous intake is open without a captcha behind it."""
-    from django.conf import settings
-
     from .conf import moderation_settings
 
     if not moderation_settings.ALLOW_ANONYMOUS_REPORTS:
         return []
-    captcha = getattr(settings, "STAPEL_CAPTCHA", None) or {}
-    if captcha.get("SECRET"):
+    from stapel_core.captcha import NoopVerifier
+    from stapel_core.django.captcha import get_verifier
+
+    try:
+        verifier = get_verifier()
+    except Exception:  # noqa: BLE001 - a broken backend is core's stapel_captcha check
+        return []
+    if not isinstance(verifier, NoopVerifier):
         return []
     return [checks.Warning(
-        "STAPEL_MODERATION['ALLOW_ANONYMOUS_REPORTS'] is on but no "
-        "STAPEL_CAPTCHA['SECRET'] is configured — the report endpoint accepts "
+        "STAPEL_MODERATION['ALLOW_ANONYMOUS_REPORTS'] is on but no captcha "
+        "verifier is configured (STAPEL_CAPTCHA['BACKEND'] and ['SECRET']), "
+        "so guest reports are not challenged — the report endpoint accepts "
         "every bot that finds it, and a flood of anonymous complaints is a "
         "denial-of-service against the moderation queue itself.",
         hint="Configure a captcha backend, or close the switch again.",
@@ -251,7 +256,7 @@ def check_anonymous_reports(app_configs, **kwargs):
 
 @checks.register(checks.Tags.compatibility)
 def check_beat_schedule(app_configs, **kwargs):
-    """W004: a beat schedule that runs none of this module's jobs.
+    """W004: no beat schedule, or one missing some of this module's jobs.
 
     Retention that nobody schedules is a promise, not a mechanism (the DOCS-02
     lesson). Worse here: without ``rearm_active_sanctions`` every suspension
@@ -262,9 +267,7 @@ def check_beat_schedule(app_configs, **kwargs):
 
     from .beat import BEAT_TASK_NAMES, REARM_TASK_NAME
 
-    schedule = getattr(settings, "CELERY_BEAT_SCHEDULE", None)
-    if not schedule:
-        return []
+    schedule = getattr(settings, "CELERY_BEAT_SCHEDULE", None) or {}
     scheduled = {
         entry.get("task")
         for entry in schedule.values()
@@ -273,11 +276,19 @@ def check_beat_schedule(app_configs, **kwargs):
     missing = [name for name in BEAT_TASK_NAMES if name not in scheduled]
     if not missing:
         return []
+    if schedule:
+        head = "CELERY_BEAT_SCHEDULE has no entry for: "
+    else:
+        # No schedule at all is the generated-app default, not a cron
+        # deployment's choice: say it, and say how a cron deployment opts out.
+        head = "CELERY_BEAT_SCHEDULE is not set, so none of these jobs run: "
     warnings = [checks.Warning(
-        "CELERY_BEAT_SCHEDULE has no entry for: " + ", ".join(missing),
+        head + ", ".join(missing),
         hint="CELERY_BEAT_SCHEDULE = {**get_moderation_beat_schedule(), ...} "
              "(stapel_moderation.beat — NOT .tasks, which cannot be imported "
-             "from a settings module).",
+             "from a settings module). If cron or a systemd timer runs these "
+             "callables instead, add 'stapel_moderation.W004' to "
+             "SILENCED_SYSTEM_CHECKS.",
         id="stapel_moderation.W004",
     )]
     if REARM_TASK_NAME in missing:

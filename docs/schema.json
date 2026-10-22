@@ -709,7 +709,7 @@
     "/moderation/api/v1/reports/": {
       "get": {
         "operationId": "moderation_api_v1_reports_list",
-        "description": "File a complaint, or list the ones you filed.\n\n**Permissions:** `IsNotAnonymousUser`",
+        "description": "File a complaint, or list the ones you filed.\n\n**Permissions:** `ReportIntakePermission`",
         "tags": [
           "Moderation / reports"
         ],
@@ -750,7 +750,7 @@
       },
       "post": {
         "operationId": "moderation_api_v1_reports_create",
-        "description": "File a complaint, or list the ones you filed.\n\n**Permissions:** `IsNotAnonymousUser`",
+        "description": "File a complaint, or list the ones you filed.\n\n**Permissions:** `ReportIntakePermission`",
         "tags": [
           "Moderation / reports"
         ],
@@ -1479,7 +1479,12 @@
             "default": "",
             "maxLength": 255
           },
-          "evidence": {}
+          "evidence": {},
+          "captcha_token": {
+            "type": "string",
+            "default": "",
+            "maxLength": 4096
+          }
         },
         "required": [
           "reason_code",

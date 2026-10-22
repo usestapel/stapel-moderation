@@ -445,7 +445,8 @@ def check_can_report(policy: dict, *, reporter_id, target_type: str, target_key:
         call(
             name,
             {
-                "reporter_id": str(reporter_id),
+                # None for a guest report — never the string "None".
+                "reporter_id": str(reporter_id) if reporter_id else None,
                 "target_type": target_type,
                 "target_key": target_key,
             },

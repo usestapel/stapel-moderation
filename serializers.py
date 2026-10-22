@@ -120,6 +120,11 @@ class ReportCreateSerializer(serializers.Serializer):
     #: and whether the blob fits MAX_EVIDENCE_BYTES, are registry/settings
     #: questions and are therefore answered in the service, not here.
     evidence = serializers.JSONField(required=False, default=dict)
+    #: Read only for a guest report under ALLOW_ANONYMOUS_REPORTS (the
+    #: ``X-Captcha-Token`` header works too); an account's report ignores it.
+    captcha_token = serializers.CharField(
+        required=False, allow_blank=True, default="", max_length=4096
+    )
 
 
 class KeysetQuerySerializer(serializers.Serializer):

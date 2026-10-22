@@ -232,7 +232,9 @@ of the photos and answering about all of them.
 - **Schedule the beat jobs.** Without `rearm_active_sanctions`, every
   suspension silently stops being enforced once the blacklist cache key
   expires (`BLACKLIST_TTL_SECONDS`, 2h) while the `Sanction` row still reads
-  `active`. `W004` says so at `manage.py check`.
+  `active`. `W004` says so at `manage.py check` — also when there is no
+  `CELERY_BEAT_SCHEDULE` at all; a cron-driven deployment silences it in
+  `SILENCED_SYSTEM_CHECKS`.
 - **Core's blacklist fails CLOSED.** When the cache backing it is
   unreachable, `stapel-core` rejects every authenticated request, not only
   sanctioned ones. That is a property of core's blacklist, and a Redis outage

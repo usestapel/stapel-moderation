@@ -4,6 +4,32 @@ All notable changes to stapel-moderation are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Pre-1.0 semver: **minor = breaking**, patch = compatible.
 
+## [0.8.4] — 2026-10-22
+
+### Fixed — `ALLOW_ANONYMOUS_REPORTS` opens the intake to guests
+
+The switch was dead: the report endpoint kept `IsNotAnonymousUser`, so a guest
+got 401 with the switch on, and no captcha was ever asked. With the switch
+open, `POST /reports/` now accepts a caller without an account: `contact_email`
+is mandatory for that caller (`error.400.moderation_contact_required`), and the
+captcha configured in `STAPEL_CAPTCHA` is verified through stapel-core's
+verifier (token in `X-Captcha-Token` or the new optional `captcha_token`
+field; `error.400.captcha_required` / `error.400.captcha_invalid`). The report
+is stored with `reporter_id = null`. A report filed with an account owes
+neither. Listing your own reports still needs an account. `W003` now asks
+core's verifier, so a `SECRET` without a `BACKEND` (captcha off) warns too.
+A `can_report` callback is asked with `reporter_id: null` for a guest, never
+the string `"None"`.
+
+### Fixed — `W004` fires when there is no beat schedule at all
+
+The check returned early when `CELERY_BEAT_SCHEDULE` was absent, which is
+exactly what a generated app ships: no sweep, no rescreen, no sanction expiry,
+and no `rearm_active_sanctions`, so every ban stopped being enforced after
+`BLACKLIST_TTL_SECONDS` while the row read `active`. It now warns, naming
+every job; a deployment that runs the callables from cron or a systemd timer
+adds `stapel_moderation.W004` to `SILENCED_SYSTEM_CHECKS`.
+
 ## [0.8.3] — 2026-09-25
 
 ### Changed — the clean copy comes from a signed link

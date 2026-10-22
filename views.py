@@ -90,6 +90,46 @@ from .serializers import (
 )
 
 
+class ReportIntakePermission(permissions.BasePermission):
+    """Who may reach the report endpoint.
+
+    Listing your own reports always needs an account. Filing one needs an
+    account unless ``ALLOW_ANONYMOUS_REPORTS`` is open — then a guest may file,
+    and the view asks for the contact address and the captcha a guest owes.
+    """
+
+    def has_permission(self, request, view):
+        if request.method == "POST" and moderation_settings.ALLOW_ANONYMOUS_REPORTS:
+            return True
+        return IsNotAnonymousUser().has_permission(request, view)
+
+
+def _anonymous_captcha_refusal(request):
+    """The captcha a guest report owes, or None when it passed.
+
+    Verified through stapel-core's configured verifier. With no verifier
+    configured (``noop``) the report passes and ``moderation.W003`` says at
+    boot that the open switch has nothing behind it.
+    """
+    from stapel_core.captcha import NoopVerifier
+    from stapel_core.django.captcha import (
+        ERR_400_CAPTCHA_INVALID,
+        ERR_400_CAPTCHA_REQUIRED,
+        get_verifier,
+    )
+    from stapel_core.netintel import client_ip
+
+    verifier = get_verifier()
+    if isinstance(verifier, NoopVerifier):
+        return None
+    token = request.headers.get("X-Captcha-Token") or request.data.get("captcha_token")
+    if not token:
+        return StapelErrorResponse(400, ERR_400_CAPTCHA_REQUIRED)
+    if not verifier.verify(token, client_ip(request)):
+        return StapelErrorResponse(400, ERR_400_CAPTCHA_INVALID)
+    return None
+
+
 class ReportThrottle(ScopedRateThrottle):
     """Report-endpoint throttle whose rate comes from THIS module's namespace.
 
@@ -190,8 +230,9 @@ def _page_cursor(rows):
 class ReportListCreateView(SerializerSeamMixin, APIView):
     """File a complaint, or list the ones you filed."""
 
-    permission_classes = [IsNotAnonymousUser]
+    permission_classes = [ReportIntakePermission]
     throttle_classes = [ReportThrottle]
+    # The default posture; ALLOW_ANONYMOUS_REPORTS opens POST to guests.
     stapel_anonymous_access = ANONYMOUS_DENIED
     request_serializer_class = ReportCreateSerializer
     response_serializer_class = ReportResultResponseSerializer
@@ -206,16 +247,20 @@ class ReportListCreateView(SerializerSeamMixin, APIView):
         payload.is_valid(raise_exception=True)
         data = payload.validated_data
 
-        if moderation_settings.ALLOW_ANONYMOUS_REPORTS and not data.get("contact_email"):
-            # DSA Art. 16(2)(c) wants a contact for the submitter. With the
-            # anonymous switch open there is no account to fall back on, so
-            # the address becomes mandatory rather than optional.
-            return StapelErrorResponse(400, ERR_400_CONTACT_REQUIRED)
+        anonymous = not IsNotAnonymousUser().has_permission(request, self)
+        if anonymous:
+            # DSA Art. 16(2)(c) wants a contact for the submitter. A guest has
+            # no account to fall back on, so the address is mandatory.
+            if not data.get("contact_email"):
+                return StapelErrorResponse(400, ERR_400_CONTACT_REQUIRED)
+            refusal = _anonymous_captcha_refusal(request)
+            if refusal is not None:
+                return refusal
 
         report, _case = services.submit_report(
             target_type=data["target_type"],
             target_key=data["target_key"],
-            reporter_id=request.user.pk,
+            reporter_id=None if anonymous else request.user.pk,
             reason_code=data["reason_code"],
             description=data.get("description") or "",
             good_faith=bool(data.get("good_faith")),

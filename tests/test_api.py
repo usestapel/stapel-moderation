@@ -7,6 +7,7 @@ making them a billing administrator, and if the grades were not actually
 enforced the whole authz chapter would be decoration.
 """
 import pytest
+from stapel_core.captcha.backends import CaptchaVerifier
 from stapel_core.comm import mutate_and_emit
 
 from stapel_moderation import services
@@ -112,6 +113,82 @@ def test_the_intake_is_closed_to_anonymous_callers(content_double, api_client):
         format="json",
     )
     assert response.status_code in (401, 403)
+
+
+class TokenIsOk(CaptchaVerifier):
+    """A captcha verifier for the guest-report tests: the token "ok" passes."""
+
+    def verify(self, token, ip=None, *, level=None):
+        return token == "ok"
+
+
+GUEST_BODY = {"target_type": "listing", "target_key": "42", "reason_code": "spam"}
+
+
+def test_the_open_switch_lets_a_guest_file_with_a_contact(
+    content_double, llm_double, api_client, settings
+):
+    """ALLOW_ANONYMOUS_REPORTS was a dead switch: a guest still got 401."""
+    from stapel_moderation.models import Report
+
+    settings.STAPEL_MODERATION = {
+        **getattr(settings, "STAPEL_MODERATION", {}),
+        "ALLOW_ANONYMOUS_REPORTS": True,
+    }
+    no_contact = api_client.post(f"{BASE}/reports/", GUEST_BODY, format="json")
+    assert no_contact.status_code == 400
+    assert no_contact.data["localizable_error"] == "error.400.moderation_contact_required"
+
+    filed = api_client.post(
+        f"{BASE}/reports/",
+        {**GUEST_BODY, "contact_email": "guest@example.com"},
+        format="json",
+    )
+    assert filed.status_code == 201, filed.data
+    report = Report.objects.get()
+    assert report.reporter_id is None
+    assert report.contact_email == "guest@example.com"
+
+    # Listing "your" reports still needs an account.
+    assert api_client.get(f"{BASE}/reports/").status_code in (401, 403)
+
+
+def test_a_guest_report_owes_the_configured_captcha(
+    content_double, llm_double, api_client, settings
+):
+    settings.STAPEL_MODERATION = {
+        **getattr(settings, "STAPEL_MODERATION", {}),
+        "ALLOW_ANONYMOUS_REPORTS": True,
+    }
+    settings.STAPEL_CAPTCHA = {"BACKEND": f"{__name__}.TokenIsOk", "SECRET": "s"}
+    body = {**GUEST_BODY, "contact_email": "guest@example.com"}
+
+    missing = api_client.post(f"{BASE}/reports/", body, format="json")
+    assert missing.status_code == 400
+    assert missing.data["localizable_error"] == "error.400.captcha_required"
+
+    wrong = api_client.post(
+        f"{BASE}/reports/", {**body, "captcha_token": "bad"}, format="json"
+    )
+    assert wrong.status_code == 400
+    assert wrong.data["localizable_error"] == "error.400.captcha_invalid"
+
+    passed = api_client.post(
+        f"{BASE}/reports/", body, format="json", HTTP_X_CAPTCHA_TOKEN="ok"
+    )
+    assert passed.status_code == 201, passed.data
+
+
+def test_an_account_report_owes_neither_contact_nor_captcha_under_the_switch(
+    content_double, llm_double, auth_client, settings
+):
+    settings.STAPEL_MODERATION = {
+        **getattr(settings, "STAPEL_MODERATION", {}),
+        "ALLOW_ANONYMOUS_REPORTS": True,
+    }
+    settings.STAPEL_CAPTCHA = {"BACKEND": f"{__name__}.TokenIsOk", "SECRET": "s"}
+    response = auth_client.post(f"{BASE}/reports/", GUEST_BODY, format="json")
+    assert response.status_code == 201, response.data
 
 
 # ── The public disclosure ────────────────────────────────────────────

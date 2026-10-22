@@ -184,8 +184,8 @@ DEFAULTS = {
     "MAX_INLINE_IMAGE_BYTES": 8_000_000,
 
     # ── Complaint intake (spec §6) ───────────────────────────────────
-    # CLOSED by default (§20.5). Opening it turns contact_email into a
-    # required field and captcha into a requirement, and prints W003.
+    # CLOSED by default (§20.5). Opening it lets a guest file a report with a
+    # mandatory contact_email and the STAPEL_CAPTCHA verifier; W003 without one.
     "ALLOW_ANONYMOUS_REPORTS": False,
     # DRF resolves scoped rates from the global DEFAULT_THROTTLE_RATES
     # setting, which a library cannot own — the rate is read from this
