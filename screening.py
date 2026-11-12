@@ -59,14 +59,57 @@ class MediaUnresolvable(Exception):
 
     ``refs`` is the evidence: without the names of the refs that failed,
     nobody can repair the seam the park is reporting.
+
+    ``causes`` maps a ref to why it failed, one of :data:`MEDIA_CAUSES`.
+    :attr:`cause` folds them into the one answer an operator needs: is this
+    deployment's CONFIGURATION keeping the photos from the screener (fix the
+    setting, re-screen, and every parked case passes), or are the photos
+    themselves gone (no setting brings them back; a person decides)?
     """
 
-    def __init__(self, refs=(), message: str = ""):
+    def __init__(self, refs=(), message: str = "", causes=None):
         self.refs = tuple(str(ref) for ref in refs)
-        super().__init__(
-            message
-            or f"{len(self.refs)} media ref(s) unresolved: {', '.join(self.refs)}"
-        )
+        self.causes = {str(k): str(v) for k, v in (causes or {}).items()}
+        super().__init__(message or self._describe())
+
+    @property
+    def cause(self) -> str:
+        values = set(self.causes.values())
+        if MEDIA_CAUSE_CONFIGURATION in values:
+            return MEDIA_CAUSE_CONFIGURATION
+        if values and values <= {MEDIA_CAUSE_GONE}:
+            return MEDIA_CAUSE_GONE
+        return MEDIA_CAUSE_UNREACHABLE
+
+    @property
+    def error_class(self) -> str:
+        """The ``Case.last_error_class`` this park is filed under."""
+        if self.cause == MEDIA_CAUSE_CONFIGURATION:
+            return "MediaMisconfigured"
+        return "MediaUnavailable"
+
+    def _describe(self) -> str:
+        refs = ", ".join(self.refs)
+        if self.cause == MEDIA_CAUSE_CONFIGURATION:
+            return (
+                f"{len(self.refs)} media ref(s) not reachable because of "
+                f"configuration: cdn.describe answers relative URLs and "
+                f"STAPEL_MODERATION['MEDIA_BASE_URL'] is empty "
+                f"(stapel_moderation.W007): {refs}"
+            )
+        if self.cause == MEDIA_CAUSE_GONE:
+            return f"{len(self.refs)} media ref(s) gone (unknown to cdn.describe): {refs}"
+        return f"{len(self.refs)} media ref(s) unresolved: {refs}"
+
+
+#: Why one media ref produced no image.
+#: ``configuration`` — it resolved to a relative URL and no origin is set;
+#: ``gone`` — ``cdn.describe`` does not know the ref, or it has no variant;
+#: ``unreachable`` — the CDN or the bytes could not be reached right now.
+MEDIA_CAUSE_CONFIGURATION = "configuration"
+MEDIA_CAUSE_GONE = "gone"
+MEDIA_CAUSE_UNREACHABLE = "unreachable"
+MEDIA_CAUSES = (MEDIA_CAUSE_CONFIGURATION, MEDIA_CAUSE_GONE, MEDIA_CAUSE_UNREACHABLE)
 
 
 @dataclass
@@ -233,7 +276,7 @@ def _fetch_image(url: str) -> Optional[tuple]:
     return body, declared
 
 
-def _media_images(content) -> list:
+def _media_images(content, failures: Optional[dict] = None) -> list:
     """Resolve the target's media refs into ``llm.complete`` image entries.
 
     Two transports, and ``MEDIA_TRANSPORT`` finally decides between them:
@@ -258,6 +301,9 @@ def _media_images(content) -> list:
     Every branch that cannot produce a usable image LOGS and continues. A
     silent drop is what let a live stand screen text only for its entire
     lifetime while every case said "screened".
+
+    ``failures``, when given, is filled with ``{ref: cause}`` for every ref
+    that produced no image (see :data:`MEDIA_CAUSES`).
     """
     import base64
     import mimetypes
@@ -279,14 +325,23 @@ def _media_images(content) -> list:
     transport = str(moderation_settings.MEDIA_TRANSPORT or "url").lower()
     images = []
     for ref in refs:
+
+        def _note(cause, ref=ref):
+            if failures is not None:
+                failures[str(ref)] = cause
+
         try:
             # "clean": signed links to the unwatermarked copies (stapel-cdn
             # 0.27+); an older CDN ignores the flag.
             described = call("cdn.describe", {"ref": str(ref), "clean": True}) or {}
-        except (CommError, LookupError, KeyError):
+        except (CommError, LookupError) as exc:
             # A media reference we cannot resolve is not a reason to abandon
             # the screening of the text next to it.
             logger.info("moderation: could not describe media ref %s", ref)
+            from .services import _is_not_found
+
+            gone = isinstance(exc, LookupError) or _is_not_found(exc)
+            _note(MEDIA_CAUSE_GONE if gone else MEDIA_CAUSE_UNREACHABLE)
             continue
         variants = described.get("variants") or []
         best = None
@@ -300,6 +355,7 @@ def _media_images(content) -> list:
         if best is None and variants:
             best = variants[0]
         if not best or not best.get("url"):
+            _note(MEDIA_CAUSE_GONE)
             continue
 
         # A watermarked rendition carries its clean copy (a short-lived signed
@@ -313,6 +369,7 @@ def _media_images(content) -> list:
                 ref,
                 best["url"],
             )
+            _note(MEDIA_CAUSE_CONFIGURATION)
             continue
 
         if transport != "data_b64":
@@ -321,6 +378,7 @@ def _media_images(content) -> list:
 
         fetched = _fetch_image(url)
         if fetched is None:
+            _note(MEDIA_CAUSE_UNREACHABLE)
             continue
         body, declared = fetched
         mime = (
@@ -333,6 +391,7 @@ def _media_images(content) -> list:
             logger.info(
                 "moderation: media ref %s has no known content type, skipped", ref
             )
+            _note(MEDIA_CAUSE_GONE)
             continue
         images.append(
             {"data_b64": base64.b64encode(body).decode("ascii"), "mime": mime}
@@ -373,7 +432,8 @@ def run_llm(case, content, *, reports=()) -> ScreeningResult:
     if provider:
         payload["provider"] = provider
     if policy["media"]:
-        images = _media_images(content)
+        failures: dict = {}
+        images = _media_images(content, failures)
         if images:
             payload["images"] = images
         elif content.media:
@@ -408,7 +468,7 @@ def run_llm(case, content, *, reports=()) -> ScreeningResult:
                 len(refs),
                 ", ".join(refs),
             )
-            raise MediaUnresolvable(refs)
+            raise MediaUnresolvable(refs, causes=failures)
 
     # Level 1: the transport itself.
     try:
@@ -479,6 +539,10 @@ def get_screener():
 
 
 __all__ = [
+    "MEDIA_CAUSES",
+    "MEDIA_CAUSE_CONFIGURATION",
+    "MEDIA_CAUSE_GONE",
+    "MEDIA_CAUSE_UNREACHABLE",
     "MediaUnresolvable",
     "ScreeningResult",
     "ScreeningUnavailable",

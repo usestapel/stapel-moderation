@@ -12,7 +12,11 @@
   the same kind of work item, served by one console and one REST surface.
 - **One status vocabulary.** `Case.state` (`open → screening → queued →
   claimed → resolved`) with a single declared transition table and exactly one
-  backward edge (`resolved → queued`, for a successful appeal). `Report` has
+  backward edge (`resolved → queued`, for a successful appeal). A `dlq` case
+  (screening could not run) is still decidable: a moderator claims it, and a
+  released claim lands in `queued`. Every case carries `actions` — the console
+  actions its state accepts (`models.CASE_ACTIONS`, derived from the table);
+  a console renders buttons from it. `Report` has
   no status; `Verdict` and `CaseEvent` are append-only facts; `Sanction` has
   its own orthogonal lifecycle.
 - **Screening as a comm-Task.** `moderation.screen` — deterministic rules

@@ -167,20 +167,23 @@ def screen_case(payload: dict) -> dict:
             _metrics.OUTCOME_UNAVAILABLE,
             seconds=_time.monotonic() - _started,
         )
-        _metrics.record_screen_failure(case.target_type, "MediaUnavailable")
+        _metrics.record_screen_failure(case.target_type, exc.error_class)
         surfaced = (
             str(moderation_settings.ON_MEDIA_UNAVAILABLE or "dlq").lower() == "review"
         )
         services.park_unscreened(
             case,
             error=str(exc),
-            error_class="MediaUnavailable",
+            error_class=exc.error_class,
             visible_to_moderators=surfaced,
             media_refs=list(exc.refs),
+            media_cause=exc.cause,
+            media_causes=dict(exc.causes),
         )
         return {
             "case_id": str(case.id),
             "parked": "media_unavailable",
+            "media_cause": exc.cause,
             "media_refs": list(exc.refs),
         }
     except Exception as exc:

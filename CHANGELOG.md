@@ -4,6 +4,45 @@ All notable changes to stapel-moderation are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Pre-1.0 semver: **minor = breaking**, patch = compatible.
 
+## [Unreleased] — proposed 0.9.0
+
+### Fixed — a dead-lettered case can be taken and decided by a moderator
+
+`dlq → claimed` is now a declared edge. Until now the console's "Take this
+case" on a dead-lettered case answered 400 `moderation_invalid_transition`,
+so a case whose screening could not run (photos the screener could not
+fetch) never reached a human decision and its target never went live. A
+moderator now claims it, decides it, or hands it back; a released claim lands
+in the human queue (`queued`), not back in the park. The dead-letter stamps
+(`dlq_at`, `last_error_class`, `last_error`) stay on the case while it is
+worked and after it is decided; only a re-screen (`POST …/rescan`) clears
+`dlq_at`.
+
+### Added — `actions` on every case (breaking for strict clients: new field)
+
+The queue row and the case card carry `actions`: the console actions the API
+accepts in the case's current state (`claim`, `release`, `resolve`,
+`rescan`), derived from the transition table (`models.CASE_ACTIONS`). A
+console renders its buttons from it instead of a copy of the table.
+`tests/test_fsm.py` walks every (state, action) pair against the service
+layer in both directions.
+
+### Changed — releasing a case nobody holds is refused for a person
+
+`POST …/release` on a case that is not `claimed` now answers 400
+`moderation_invalid_transition` (it answered 200 without doing anything). The
+system sweepers still release idempotently.
+
+### Changed — screening says whether photos are gone or out of reach
+
+A park on media now records why: `MediaMisconfigured` (a new
+`last_error_class`) when the refs exist but resolve to relative URLs while
+`MEDIA_BASE_URL` is empty — the state `stapel_moderation.W007` warns about at
+boot, repaired by the setting and a re-screen — and `MediaUnavailable` when
+`cdn.describe` does not know the refs (the photos are gone) or the CDN could
+not be reached. The audit row carries `media_cause` and per-ref
+`media_causes`; `last_error` names the setting or says "gone".
+
 ## [0.8.4] — 2026-10-22
 
 ### Fixed — `ALLOW_ANONYMOUS_REPORTS` opens the intake to guests

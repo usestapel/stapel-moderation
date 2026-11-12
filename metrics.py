@@ -89,11 +89,16 @@ ERROR_CLASS_SCREENING = "ScreeningUnavailable"
 #: shade of ScreeningUnavailable: nothing was retried, and the repair is a CDN
 #: seam rather than a provider.
 ERROR_CLASS_MEDIA = "MediaUnavailable"
+#: Every declared media ref failed because of this deployment's settings
+#: (relative CDN URLs, no MEDIA_BASE_URL; moderation.W007 said so at boot).
+#: Repaired by a setting and a re-screen, unlike MediaUnavailable.
+ERROR_CLASS_MEDIA_CONFIG = "MediaMisconfigured"
 ERROR_CLASS_TARGET_GONE = "TargetNotFound"
 ERROR_CLASSES = (
     ERROR_CLASS_CONTENT,
     ERROR_CLASS_SCREENING,
     ERROR_CLASS_MEDIA,
+    ERROR_CLASS_MEDIA_CONFIG,
     ERROR_CLASS_TARGET_GONE,
     "InvalidTransition",
     "other",

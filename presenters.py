@@ -17,7 +17,7 @@ from stapel_core.django.api.presenters import Presenter, PresenterField
 from stapel_core.django.swappable import declare_swap, get_presenter
 
 from .dto import ContentDTO
-from .models import Appeal, Case, CaseEvent, Report, Sanction, Verdict
+from .models import CASE_ACTIONS, Appeal, Case, CaseEvent, Report, Sanction, Verdict
 
 #: Where :func:`present_case_detail` parks the resolved content envelope so
 #: the presenter can read it off the DAO. The read hits another module and
@@ -66,6 +66,10 @@ def _content_of(dao) -> ContentDTO:
     return content
 
 
+def _actions_of(dao) -> List[str]:
+    return [str(action) for action in CASE_ACTIONS.get(dao.state, ())]
+
+
 class CasePresenter(Presenter):
     """Presents one row of the cross-target moderator queue.
 
@@ -90,7 +94,8 @@ class CasePresenter(Presenter):
             "dlq_at": null,
             "last_error_class": "",
             "last_error": "",
-            "escalated_at": null
+            "escalated_at": null,
+            "actions": ["claim", "resolve", "rescan"]
         }
     """
 
@@ -135,7 +140,10 @@ class CasePresenter(Presenter):
             type=Optional[str],
             source=lambda dao: _iso(dao.dlq_at),
             default=None,
-            help_text="When screening gave up on this case. Null unless state is dlq.",
+            help_text=(
+                "When screening gave up on this case. Kept while a moderator "
+                "claims and decides it; cleared by a re-screen."
+            ),
         ),
         "last_error_class": PresenterField(
             type=str,
@@ -143,7 +151,7 @@ class CasePresenter(Presenter):
             default="",
             help_text=(
                 "Class of the last screening failure - ContentUnavailable, "
-                "ScreeningUnavailable, TargetNotFound, other. Closed vocabulary; "
+                "ScreeningUnavailable, MediaUnavailable, MediaMisconfigured, TargetNotFound, other. Closed vocabulary; "
                 "group the DLQ tab by it."
             ),
         ),
@@ -158,6 +166,16 @@ class CasePresenter(Presenter):
             source=lambda dao: _iso(dao.escalated_at),
             default=None,
             help_text="Set when the automatic re-screen sweep spent its cap and stopped.",
+        ),
+        "actions": PresenterField(
+            type=List[str],
+            source=_actions_of,
+            default=list,
+            help_text=(
+                "Console actions the API accepts for this case in its current "
+                "state: claim, release, resolve, rescan. Render buttons from "
+                "this list; anything absent is refused."
+            ),
         ),
     }
 
@@ -383,6 +401,7 @@ class CaseDetailPresenter(Presenter):
             "last_error_class": "",
             "last_error": "",
             "escalated_at": null,
+            "actions": ["claim", "resolve", "rescan"],
             "reports": [],
             "verdicts": [],
             "sanctions": [],
@@ -435,7 +454,10 @@ class CaseDetailPresenter(Presenter):
             type=Optional[str],
             source=lambda dao: _iso(dao.dlq_at),
             default=None,
-            help_text="When screening gave up on this case. Null unless state is dlq.",
+            help_text=(
+                "When screening gave up on this case. Kept while a moderator "
+                "claims and decides it; cleared by a re-screen."
+            ),
         ),
         "last_error_class": PresenterField(
             type=str,
@@ -443,7 +465,7 @@ class CaseDetailPresenter(Presenter):
             default="",
             help_text=(
                 "Class of the last screening failure - ContentUnavailable, "
-                "ScreeningUnavailable, TargetNotFound, other. Closed vocabulary; "
+                "ScreeningUnavailable, MediaUnavailable, MediaMisconfigured, TargetNotFound, other. Closed vocabulary; "
                 "the same value the queue row carries."
             ),
         ),
@@ -458,6 +480,16 @@ class CaseDetailPresenter(Presenter):
             source=lambda dao: _iso(dao.escalated_at),
             default=None,
             help_text="Set when the automatic re-screen sweep spent its cap and stopped.",
+        ),
+        "actions": PresenterField(
+            type=List[str],
+            source=_actions_of,
+            default=list,
+            help_text=(
+                "Console actions the API accepts for this case in its current "
+                "state: claim, release, resolve, rescan. Render buttons from "
+                "this list; anything absent is refused."
+            ),
         ),
         "reports": PresenterField(
             type=ReportPresenter, many=True, source=lambda dao: dao.reports.all()

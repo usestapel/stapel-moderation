@@ -105,11 +105,53 @@ CASE_TRANSITIONS = {
     ),
     CaseState.CLAIMED: (CaseState.QUEUED, CaseState.RESOLVED),
     # Out of the dead-letter park in every direction a person or a repaired
-    # seam could want: back onto the ladder (``rescan``), into the human
-    # queue (a moderator taking it by hand), or straight to a verdict.
-    CaseState.DLQ: (CaseState.SCREENING, CaseState.QUEUED, CaseState.RESOLVED),
+    # seam could want: back onto the ladder (``rescan``), into a moderator's
+    # hands (``claim`` — a released claim lands in the human queue), into the
+    # human queue, or straight to a verdict. The dead-letter stamps stay on
+    # the case through all of them except a re-screen.
+    CaseState.DLQ: (
+        CaseState.SCREENING,
+        CaseState.CLAIMED,
+        CaseState.QUEUED,
+        CaseState.RESOLVED,
+    ),
     CaseState.RESOLVED: (CaseState.QUEUED,),
 }
+
+
+class CaseAction(models.TextChoices):
+    """What a moderator console may ask the API to do to one case.
+
+    Each member is one console endpoint: ``claim`` and ``release`` are the
+    lease, ``resolve`` is the verdict route, ``rescan`` hands the case back
+    to the automatic screener.
+    """
+
+    CLAIM = "claim", "Claim"
+    RELEASE = "release", "Release"
+    RESOLVE = "resolve", "Resolve"
+    RESCAN = "rescan", "Re-screen"
+
+
+def _actions_for(state) -> tuple:
+    allowed = CASE_TRANSITIONS.get(state, ())
+    actions = []
+    if state == CaseState.CLAIMED or CaseState.CLAIMED in allowed:
+        actions.append(CaseAction.CLAIM)
+    if state == CaseState.CLAIMED:
+        actions.append(CaseAction.RELEASE)
+    if CaseState.RESOLVED in allowed:
+        actions.append(CaseAction.RESOLVE)
+    actions.append(CaseAction.RESCAN)
+    return tuple(actions)
+
+
+#: The actions the API accepts per state, derived from ``CASE_TRANSITIONS``
+#: so the two can never disagree. Presented on every case as ``actions``: a
+#: console renders its buttons from this, not from its own copy of the table.
+#: Every pair outside it is refused by the service layer (tests/test_fsm.py
+#: walks the full product).
+CASE_ACTIONS = {state: _actions_for(state) for state in CaseState}
 
 
 class VerdictDecision(models.TextChoices):
@@ -595,6 +637,7 @@ class UserSanctionState(ProjectionModel):
 
 
 __all__ = [
+    "CASE_ACTIONS",
     "CASE_TRANSITIONS",
     "HUMAN_QUEUE_STATES",
     "OPEN_STATES",
@@ -602,6 +645,7 @@ __all__ = [
     "Appeal",
     "AppealState",
     "Case",
+    "CaseAction",
     "CaseEvent",
     "CaseEventKind",
     "CaseOrigin",

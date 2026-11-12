@@ -895,3 +895,65 @@ def test_a_listing_with_no_photos_at_all_is_screened_on_its_text(
 
     case.refresh_from_db()
     assert case.last_verdict.decision == "approved"
+
+
+# ── Configuration versus gone: two parks, two repairs ────────────────
+
+
+def test_media_unreachable_because_of_configuration_is_its_own_class(
+    content_double, cdn_double, llm_double, settings
+):
+    """The ref exists; this deployment cannot hand it to a provider.
+
+    ``cdn.describe`` answers a relative URL and ``MEDIA_BASE_URL`` is empty —
+    the state W007 warns about at boot. Repaired by a setting and a re-screen,
+    so it must not be filed beside photos that are actually gone.
+    """
+    from stapel_core.comm import mutate_and_emit
+
+    from stapel_moderation.models import CaseEvent, CaseEventKind
+
+    settings.STAPEL_MODERATION = {"MEDIA_BASE_URL": ""}
+    content_double["media"] = ["product/802d669"]  # known to cdn_double
+
+    case = _open_case()
+    with mutate_and_emit() as emit_event:
+        services.start_screening(case, emit_event=emit_event)
+
+    case.refresh_from_db()
+    assert case.state == CaseState.DLQ
+    assert case.last_error_class == "MediaMisconfigured"
+    assert "MEDIA_BASE_URL" in case.last_error
+    assert "stapel_moderation.W007" in case.last_error
+    row = CaseEvent.objects.filter(case=case, kind=CaseEventKind.DEAD_LETTERED).latest(
+        "created_at"
+    )
+    assert row.payload["media_cause"] == "configuration"
+    assert row.payload["media_causes"] == {"product/802d669": "configuration"}
+
+    from django.core.checks import run_checks
+
+    assert "stapel_moderation.W007" in {getattr(m, "id", "") for m in run_checks()}
+
+
+def test_media_the_cdn_does_not_know_is_filed_as_gone(
+    content_double, cdn_double, llm_double, settings
+):
+    from stapel_core.comm import mutate_and_emit
+
+    from stapel_moderation.models import CaseEvent, CaseEventKind
+
+    settings.STAPEL_MODERATION = {"MEDIA_BASE_URL": "https://cdn.example.test"}
+    content_double["media"] = ["product/never-uploaded"]
+
+    case = _open_case()
+    with mutate_and_emit() as emit_event:
+        services.start_screening(case, emit_event=emit_event)
+
+    case.refresh_from_db()
+    assert case.last_error_class == "MediaUnavailable"
+    assert "gone" in case.last_error
+    row = CaseEvent.objects.filter(case=case, kind=CaseEventKind.DEAD_LETTERED).latest(
+        "created_at"
+    )
+    assert row.payload["media_cause"] == "gone"

@@ -619,6 +619,7 @@ ERROR_CLASSES = (
     "ContentUnavailable",
     "ScreeningUnavailable",
     "MediaUnavailable",
+    "MediaMisconfigured",
     "TargetNotFound",
     "InvalidTransition",
     "other",
@@ -1364,11 +1365,18 @@ def release_case(case, *, actor_id=None) -> Case:
     role-revoked handler) and is never refused. A named moderator may only
     release a live lease that is their own — otherwise one console tab can
     yank a case out from under the person reading it.
+
+    Releasing a case nobody holds is a no-op for the system and a refusal
+    (:class:`InvalidTransition`) for a moderator: ``release`` is not in
+    ``CASE_ACTIONS`` for that state, and a 200 there would tell a console an
+    action happened that did not.
     """
     now = timezone.now()
     with transaction.atomic():
         case = Case.objects.select_for_update().get(pk=case.pk)
         if case.state != CaseState.CLAIMED:
+            if actor_id is not None:
+                raise InvalidTransition(f"{case.state} -> release")
             return case
         if (
             actor_id is not None
