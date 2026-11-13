@@ -4,7 +4,7 @@ All notable changes to stapel-moderation are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Pre-1.0 semver: **minor = breaking**, patch = compatible.
 
-## [Unreleased] — proposed 0.9.0
+## [0.9.0] — 2026-11-13
 
 ### Fixed — a dead-lettered case can be taken and decided by a moderator
 
